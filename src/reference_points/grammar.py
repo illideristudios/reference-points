@@ -1,9 +1,8 @@
 """The address grammar: parse a reference string into a structured ``Ref``.
 
-An address reads **turN · Section · Entity · Location** — ``N27-S1.T2.3``. Parsing
-validates structure and static legality (mandatory turn, legal entity letters,
-location shape legal for the terminal entity type). Range and ambiguity checks
-belong to :mod:`reference_points.resolve`, which has the message in hand.
+An address reads **turN · Section · Entity · Location** — ``N27-S1.T2.3``. Only
+structure and *static* legality are checked here; range and ambiguity need the
+message in hand, so they belong to :mod:`reference_points.resolve`.
 """
 
 from __future__ import annotations
@@ -18,9 +17,7 @@ _NO_LOCATION_ENTITIES = frozenset("DR")  # a diagram and a ref def have no sub-u
 
 _TURN_RE = re.compile(r"^N(\d+)")
 _SECTION_RE = re.compile(r"^-S(\d+)")
-# The index is optional: an entity step may instead be selected by the trailing
-# match — `R(/mdit/)` names the same reference `R1` names, `P(/caching/)` the
-# paragraph about caching.
+# The index is optional — a step may be selected by the trailing match instead.
 _ENTITY_RE = re.compile(r"([A-Za-z])(\d*)$")
 _MATCH_TAIL_RE = re.compile(r"\.?\((g?)/(.*)/\)$")
 _ROW_COL_RE = re.compile(r"(\d+),(\d+)$")
@@ -28,16 +25,12 @@ _COL_ONLY_RE = re.compile(r",(\d+)$")
 
 
 class RefError(Exception):
-    """Raised when an address string is malformed or violates the grammar."""
+    """Raised when an address is malformed or violates the grammar."""
 
 
 @dataclass(frozen=True)
 class EntityStep:
-    """One entity in the path, e.g. table 2 → ``EntityStep("T", 2)``.
-
-    ``index`` is ``None`` when the terminal step is selected by the address's
-    match instead — ``R(/mdit/)`` rather than ``R1``.
-    """
+    """``index`` is ``None`` when the match selects the step: ``R(/mdit/)``, not ``R1``."""
 
     letter: str
     index: int | None
@@ -45,7 +38,7 @@ class EntityStep:
 
 @dataclass(frozen=True)
 class TableLoc:
-    """A table location: a row, a cell (``row,col``), or a whole column (``,col``)."""
+    """A row, a cell (``row,col``), or a whole column (``,col``)."""
 
     row: int | None
     col: int | None
@@ -53,7 +46,7 @@ class TableLoc:
 
 @dataclass(frozen=True)
 class MatchLoc:
-    """A content match: ``(/text/)`` (single) or ``(g/text/)`` (every)."""
+    """``(/text/)`` (single) or ``(g/text/)`` (every)."""
 
     text: str
     every: bool
@@ -64,9 +57,8 @@ Location = int | TableLoc | None
 
 @dataclass(frozen=True)
 class Ref:
-    """A parsed address. ``location`` and ``match`` both attach to the terminal
-    entity in ``path`` and compose: the location is a structural coordinate, the
-    match is a content regex that scopes finer within it. Either may be absent."""
+    """``location`` and ``match`` both attach to the terminal step and compose: a
+    structural coordinate, then a regex scoping finer within it."""
 
     turn: int
     section: int | None
@@ -77,8 +69,8 @@ class Ref:
 
 
 def _normalize_glyphs(raw: str) -> str:
-    """Fold the display glyphs (``◆ § ·``) to their ASCII roles and drop separator
-    spaces — but preserve spaces inside a trailing ``(/…/)`` match string."""
+    """Fold the glyphs to ASCII and drop separator spaces — but not inside a
+    trailing ``(/…/)``, where they are part of the pattern."""
     s = raw.replace("◆", "N").replace("§", "-S").replace("·", ".")
     open_paren = s.find("(")
     if open_paren != -1 and s.rstrip().endswith(")"):
@@ -123,13 +115,8 @@ def _check_match_legal(step: EntityStep, location: Location) -> None:
 
 
 def _check_selector_legal(step: EntityStep, location: Location, match: MatchLoc | None) -> None:
-    """Legality of an index-less entity step — one selected by the address's match
-    rather than by number (``R(/mdit/)``, ``P(/caching/)``).
-
-    It needs that match, and it takes no location, having already spent the match
-    on choosing the entity. Both forms are legal and mean what they mean anywhere
-    else: ``(/…/)`` selects the single hit, ``(g/…/)`` every hit.
-    """
+    """A step with no index needs the match and takes no location, having spent the
+    match on choosing the entity. Both match forms are legal there."""
     if match is None:
         raise RefError(f"entity {step.letter} needs an index")
     if location is not None:
@@ -158,7 +145,7 @@ def _split_turn_section(s: str) -> tuple[int, int | None, str]:
 
 
 def _peel_match_location(body: str) -> tuple[MatchLoc | None, str]:
-    """Peel a trailing ``(/…/)`` / ``(g/…/)`` match string off ``body``."""
+    """Peel a trailing ``(/…/)`` / ``(g/…/)`` off ``body``."""
     match_tail = _MATCH_TAIL_RE.search(body)
     if not match_tail:
         return None, body
@@ -169,7 +156,6 @@ def _peel_match_location(body: str) -> tuple[MatchLoc | None, str]:
 
 
 def _parse_path(components: list[str]) -> tuple[tuple[EntityStep, ...], Location]:
-    """Parse dotted components into an entity path plus an optional numeric location."""
     path: list[EntityStep] = []
     location: Location = None
     for i, comp in enumerate(components):
@@ -190,7 +176,7 @@ def _parse_path(components: list[str]) -> tuple[tuple[EntityStep, ...], Location
 
 
 def parse_ref(raw: str) -> Ref:
-    """Parse ``raw`` into a :class:`Ref`, or raise :class:`RefError` naming the defect."""
+    """Or raise :class:`RefError` naming the defect."""
     s = _normalize_glyphs(raw).strip()
     if not s:
         raise RefError("empty address")

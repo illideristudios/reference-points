@@ -138,8 +138,8 @@ INDENTED = "alpha.\n\n    indented line one\n    indented line two\n\nbeta.\n"
 
 
 def test_indented_code_block_is_verbatim_not_prose() -> None:
-    # It used to fall through to _consume_paragraph, which strips each line and
-    # joins them — destroying the content the block exists to preserve.
+    # Prose treatment would strip and join the lines, destroying the content the
+    # block exists to preserve.
     entities = decompose(INDENTED).sections[0].entities
     assert [type(e) for e in entities] == [Paragraph, CodeBlock, Paragraph]
     code = entities[1]
@@ -149,8 +149,7 @@ def test_indented_code_block_is_verbatim_not_prose() -> None:
 
 
 def test_indented_code_does_not_interrupt_a_paragraph() -> None:
-    # CommonMark: an indented line following prose with no blank between is a
-    # lazy continuation of the paragraph, not a code block.
+    # CommonMark: an indented line under prose is a lazy continuation, not code.
     entities = decompose("alpha.\n    still alpha.\n").sections[0].entities
     assert [type(e) for e in entities] == [Paragraph]
 
@@ -166,8 +165,8 @@ def test_html_block_is_one_verbatim_code_entity() -> None:
 
 
 def test_markdown_between_html_tags_is_still_a_paragraph() -> None:
-    # CommonMark HTML block type 6 ends at the blank line, so the prose between
-    # the tags is ordinary markdown — this is correct, not a gap.
+    # An HTML block ends at the blank line, so prose between the tags is ordinary
+    # markdown. Correct, not a gap.
     entities = decompose(HTML_BLOCK).sections[0].entities
     assert [type(e) for e in entities] == [CodeBlock, Paragraph, CodeBlock]
     para = entities[1]
@@ -176,24 +175,21 @@ def test_markdown_between_html_tags_is_still_a_paragraph() -> None:
 
 
 def test_thematic_break_is_not_an_entity() -> None:
-    # No addressable content: consume it and emit nothing.
     entities = decompose("alpha.\n\n---\n\nbeta.\n").sections[0].entities
     assert [type(e) for e in entities] == [Paragraph, Paragraph]
     assert [e.index for e in entities] == [1, 2]
 
 
 def test_an_indented_bullet_stays_a_list_item() -> None:
-    # List dispatch must precede indented-code dispatch or a nested bullet reads
-    # as code.
+    # Four spaces under a bullet is a nested item, not an indented code block.
     lst = decompose("- top level\n    - doubly nested bullet\n").sections[0].entities[0]
     assert isinstance(lst, ListBlock)
     assert lst.items == ("top level", "doubly nested bullet")
 
 
 # --- setext headings -----------------------------------------------------
-# They used to decompose as paragraphs, so `P1` resolved to "Title =====" and
-# every entity beneath the heading was indexed into the wrong section — silent
-# mis-resolution that rendered correctly.
+# As paragraphs these indexed every entity below them into the wrong section —
+# silent mis-resolution that rendered correctly.
 
 
 def test_setext_level_one_opens_a_section() -> None:
@@ -204,7 +200,7 @@ def test_setext_level_one_opens_a_section() -> None:
 
 
 def test_setext_level_two_opens_a_section_without_promoting_it() -> None:
-    # `len(markup)` would say 1 here, which is why `level` is its own field.
+    # `len(markup)` would say 1 here — why `level` is its own field.
     section = decompose("Title\n-----\n\nBody.\n").sections[0]
     assert section.heading == "Title"
     assert section.level == 2
@@ -229,7 +225,7 @@ def test_setext_and_atx_headings_nest_by_level() -> None:
 
 
 def test_a_loose_list_is_one_list_block() -> None:
-    # A blank line between bullets makes the list loose, not two lists.
+    # A blank line makes the list loose, not two lists.
     entities = decompose("- a\n- b\n\n- c\n").sections[0].entities
     assert [type(e) for e in entities] == [ListBlock]
     lst = entities[0]
@@ -238,7 +234,7 @@ def test_a_loose_list_is_one_list_block() -> None:
 
 
 def test_a_nested_list_flattens_depth_first() -> None:
-    # Every bullet stays addressable, and `L1.3` is the third bullet a reader counts.
+    # `L1.3` stays the third bullet a reader counts.
     lst = decompose("- top\n  - nested\n    - deep\n- another\n").sections[0].entities[0]
     assert isinstance(lst, ListBlock)
     assert lst.items == ("top", "nested", "deep", "another")
@@ -254,8 +250,8 @@ def test_a_list_item_carries_only_its_own_direct_text() -> None:
 
 
 def test_a_link_reference_definition_is_a_reference_not_a_paragraph() -> None:
-    # As a paragraph it took a `.P1` label, which stopped the line being a
-    # definition at all — every `[ref]` in the labeled copy then rendered as text.
+    # A `.P1` label on it stops the line being a definition, so every `[ref]` in
+    # the labeled copy renders as text.
     entities = decompose('[ref]: https://example.com "Title"\n').sections[0].entities
     assert [type(e) for e in entities] == [Reference]
     ref = entities[0]

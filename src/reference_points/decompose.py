@@ -1,15 +1,11 @@
 """Decompose a markdown message into a ``Section → Entity → Location`` tree.
 
-This is the single source of truth for addresses: the same tree is rendered into
-labels and walked to resolve a reference, so a label and its lookup agree by
-construction. Parsing runs on the markdown *source* — sound because GFM rendering
-preserves block-level structure (see ``REFERENCE_POINTS.md``).
+The single source of truth for addresses: the same tree is rendered into labels
+and walked to resolve a reference, so the two agree by construction. Parsing the
+*source* is sound because GFM preserves block structure (``REFERENCE_POINTS.md``).
 
-Block structure comes from ``markdown-it-py``, a CommonMark parser, so setext
-headings, loose lists, lazy continuation, nesting depth and link reference
-definitions are the parser's problem. What lives here is the mapping from its
-token stream onto the entity alphabet — a new construct is a row in that mapping,
-not a new scanner branch.
+Block structure comes from ``markdown-it-py``, so a new construct is a row in the
+mapping below, not a scanner branch.
 """
 
 from __future__ import annotations
@@ -25,11 +21,9 @@ if TYPE_CHECKING:
 
     from markdown_it.token import Token
 
-# CommonMark plus tables — deliberately not the ``gfm-like`` preset, which turns
-# on linkify and raises ModuleNotFoundError unless ``linkify-it-py`` is installed
-# alongside. ``inline`` is disabled because only block structure is consumed
-# here: the inline token's ``.content`` (the raw markdown this module reads) is
-# set by the *block* parser and survives; only its ``.children`` goes empty.
+# Not ``gfm-like``: it enables linkify, which raises unless ``linkify-it-py`` is
+# installed. Disabling ``inline`` costs nothing — the raw source this module reads
+# is ``inline.content``, set by the block parser.
 _MD = MarkdownIt("commonmark").enable("table").disable("inline")
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[\"'(\[]?[A-Z0-9])")
@@ -40,7 +34,7 @@ _LIST_OPENS = frozenset({"bullet_list_open", "ordered_list_open"})
 
 @dataclass(frozen=True)
 class Paragraph:
-    """A prose block. Location = sentence index. ``line`` = 0-based source line."""
+    """Location = sentence index. ``line`` is 0-based."""
 
     index: int
     line: int
@@ -50,7 +44,7 @@ class Paragraph:
 
 @dataclass(frozen=True)
 class Table:
-    """A table. ``rows`` includes the header as row 1; the separator row is dropped."""
+    """``rows`` includes the header as row 1; the separator row is dropped."""
 
     index: int
     line: int
@@ -59,8 +53,8 @@ class Table:
 
 @dataclass(frozen=True)
 class CodeBlock:
-    """A verbatim block — fenced, indented, or raw HTML. Its content is preserved
-    exactly, so the location is a 1-indexed logical (``\\n``-delimited) line."""
+    """Fenced, indented, or raw HTML. Content is exact, so the location is a
+    1-indexed ``\\n``-delimited line."""
 
     index: int
     line: int
@@ -70,7 +64,7 @@ class CodeBlock:
 
 @dataclass(frozen=True)
 class ListBlock:
-    """A list. Location = 1-indexed item, counting every bullet at every depth."""
+    """Location = 1-indexed item, counting every bullet at every depth."""
 
     index: int
     line: int
@@ -79,7 +73,7 @@ class ListBlock:
 
 @dataclass(frozen=True)
 class Diagram:
-    """A diagram (mermaid/dot fence). Takes no location."""
+    """A mermaid/dot fence. Takes no location."""
 
     index: int
     line: int
@@ -88,13 +82,9 @@ class Diagram:
 
 @dataclass(frozen=True)
 class Reference:
-    """A link reference definition (``[key]: destination "title"``).
-
-    Addressable but never labeled inline: the definition renders to *nothing*, so
-    a label would put visible text where the reader saw none. ``key`` is the
-    CommonMark-normalized label, which is what makes ``[MDIT]``, ``[ mdit ]`` and
-    ``[mdit]`` one reference. Takes no location.
-    """
+    """Addressable, never labeled inline: it renders to nothing, so a label would
+    show text where the reader saw none. ``key`` is the CommonMark-normalized
+    label, which makes ``[MDIT]`` and ``[ mdit ]`` one reference. No location."""
 
     index: int
     line: int
@@ -104,15 +94,14 @@ class Reference:
 
     @property
     def text(self) -> str:
-        """The definition as one line — what an address to it resolves to, and
-        what a ``(/…/)`` selector matches against (key, destination and title)."""
+        """What an address resolves to, and what a selector matches."""
         title = f' "{self.title}"' if self.title else ""
         return f"[{self.key}]: {self.destination}{title}"
 
 
 @dataclass(frozen=True)
 class Quote:
-    """A blockquote — a container that nests inner entities."""
+    """A blockquote. Container."""
 
     index: int
     line: int
@@ -121,13 +110,11 @@ class Quote:
 
 @dataclass(frozen=True)
 class Section:
-    """A section (markdown heading, or the implicit whole-message S1). Container.
+    """A heading, or the implicit whole-message S1 (``line == -1``).
 
-    ``line`` is the 0-based source line of the heading, or ``-1`` for the implicit
-    S1. ``markup`` is the literal marker — ``'##'`` for ATX, ``'='`` / ``'-'`` for
-    setext — which is what tells the renderer whether to rebuild the line or to
-    prefix the label and leave the underline alone. ``level`` is not derivable
-    from it: ``len('###')`` is 3, but a setext **h2** has ``markup == '-'``.
+    ``markup`` is the literal marker, which lets the renderer rebuild an ATX line
+    but only prefix a setext one. ``level`` is not derivable from it — a setext
+    **h2** has ``markup == '-'``.
     """
 
     index: int
@@ -143,18 +130,13 @@ Entity = Paragraph | Table | CodeBlock | ListBlock | Diagram | Reference | Quote
 
 @dataclass(frozen=True)
 class Message:
-    """A decomposed message: top-level sections plus the original source."""
-
     sections: tuple[Section, ...]
     source: str
 
 
 def split_sentences(text: str) -> tuple[str, ...]:
-    """Split a paragraph's logical text into sentences (pragmatic heuristic).
-
-    Imperfection is acceptable *because* this same function runs at label-time and
-    resolve-time, so labels and lookups stay self-consistent.
-    """
+    """Heuristic, and imperfection is acceptable *because* this runs at both
+    label-time and resolve-time, keeping labels and lookups self-consistent."""
     stripped = text.strip()
     if not stripped:
         return ()
@@ -173,14 +155,12 @@ class _Counter:
 
 
 # --- link reference definitions ------------------------------------------
-# They emit no tokens at all, so they are read from the parser's collected
-# reference table and interleaved back into the token spans by source line.
+# They emit no tokens, so they come from the parser's reference table and are
+# interleaved back into the spans by source line.
 
 
 @dataclass(frozen=True)
 class _RawRef:
-    """One entry of the parser's reference table, before it is indexed."""
-
     line: int
     key: str
     destination: str
@@ -195,7 +175,6 @@ def _entry_line(entry: Mapping[str, object]) -> int:
 
 
 def _collect_references(env: Mapping[str, Any]) -> list[_RawRef]:
-    """Read the parser's reference table into source order."""
     table: object = env.get("references")
     if not isinstance(table, dict):
         return []
@@ -217,26 +196,22 @@ def _collect_references(env: Mapping[str, Any]) -> list[_RawRef]:
 
 
 class _RefFeed:
-    """Reference definitions in source order, handed out by line.
-
-    The walker asks for everything that starts before the next token span, so a
-    definition lands between the blocks it sits between; a container takes a
-    sub-feed of the definitions that fall inside its own line range.
-    """
+    """Definitions in source order, so each lands between the blocks it sits
+    between."""
 
     def __init__(self, refs: list[_RawRef]) -> None:
         self._refs = refs
         self._at = 0
 
     def take_before(self, limit: int | None) -> list[_RawRef]:
-        """Definitions starting before ``limit`` (``None`` = all that are left)."""
+        """``None`` takes everything left."""
         start = self._at
         while self._at < len(self._refs) and (limit is None or self._refs[self._at].line < limit):
             self._at += 1
         return self._refs[start : self._at]
 
     def split(self, limit: int | None) -> _RefFeed:
-        """Hand a nested container its own feed, consuming those definitions here."""
+        """Consumed here, so a nested container never re-emits them."""
         return _RefFeed(self.take_before(limit))
 
 
@@ -257,7 +232,7 @@ def _references(raw: list[_RawRef], counter: _Counter) -> list[Entity]:
 
 
 def _spans(tokens: list[Token]) -> list[list[Token]]:
-    """Group a flat token list into top-level block spans (each open…close run)."""
+    """Group a flat token list into top-level block spans (open…close runs)."""
     spans: list[list[Token]] = []
     current: list[Token] = []
     depth = 0
@@ -267,20 +242,15 @@ def _spans(tokens: list[Token]) -> list[list[Token]]:
         if depth == 0:
             spans.append(current)
             current = []
-    if current:  # unbalanced input: keep the tail rather than dropping it
+    if current:  # unbalanced input: keep the tail rather than drop it
         spans.append(current)
     return spans
 
 
 def _span_lines(spans: list[list[Token]]) -> list[int]:
-    """The absolute source line of each span, narrowing ``Token.map`` *totally*.
-
-    A head token without a map takes the previous span's line, so the entity is
-    still built and still addressable — never skipped, never raised. Against
-    markdown-it-py 4.x the branch is unreachable: every block rule sets ``map`` on
-    its open token, and the only unmapped opens are ``th_open``/``td_open``, which
-    are never a span head.
-    """
+    """Narrows ``Token.map`` *totally*: an unmapped head takes the previous span's
+    line, so the entity is still built — never skipped, never raised. Unreachable
+    in markdown-it-py 4.x, where only ``th_open``/``td_open`` lack a map."""
     lines: list[int] = []
     last = 0
     for span in spans:
@@ -292,7 +262,7 @@ def _span_lines(spans: list[list[Token]]) -> list[int]:
 
 
 def _content_lines(content: str) -> tuple[str, ...]:
-    """Split a verbatim token's content, dropping only its terminating newline."""
+    """Drops *only* the terminating newline."""
     lines = content.split("\n")
     if lines and not lines[-1]:
         lines.pop()
@@ -304,14 +274,12 @@ def _inline_text(span: list[Token]) -> str:
 
 
 def _join_lines(text: str) -> str:
-    """Join a block's source lines the way a reader reads them: one space per line
-    break, nothing leading or trailing."""
+    """One space per line break — the way a reader reads it."""
     return " ".join(part.strip() for part in text.split("\n")).strip()
 
 
 def _table_rows(span: list[Token]) -> tuple[tuple[str, ...], ...]:
-    """Rows including the header. The parser normalizes every row to the header's
-    width, so a ragged source row cannot produce a short row here."""
+    """The parser pads rows to the header's width, so none can come back short."""
     rows: list[tuple[str, ...]] = []
     cells: list[str] = []
     for token in span:
@@ -325,37 +293,32 @@ def _table_rows(span: list[Token]) -> tuple[tuple[str, ...], ...]:
 
 
 def _list_items(span: list[Token]) -> tuple[str, ...]:
-    """Every bullet at every depth, depth-first — which is already token order.
-
-    An item's text is its own *direct* paragraph content: a nested list belongs to
-    the items it contains, not to its parent's text. Flattening is what keeps
-    ``L1.3`` pointing at the third bullet a reader counts.
-    """
+    """Every bullet at every depth, depth-first (already token order), each with
+    only its own direct paragraph text. Flattening keeps ``L1.3`` the third bullet
+    a reader counts."""
     items: list[list[str]] = []
-    open_at: list[int] = []  # depth at which each currently-open item started
-    stack: list[int] = []  # index into `items` of each currently-open item
+    opened_at: list[int] = []
+    open_items: list[int] = []
     depth = 0
     for token in span:
         if token.type == "list_item_open":
             items.append([])
-            stack.append(len(items) - 1)
-            open_at.append(depth)
+            open_items.append(len(items) - 1)
+            opened_at.append(depth)
         elif token.type == "list_item_close":
-            stack.pop()
-            open_at.pop()
-        elif token.type == "inline" and stack and depth == open_at[-1] + 2:
+            open_items.pop()
+            opened_at.pop()
+        elif token.type == "inline" and open_items and depth == opened_at[-1] + 2:
             # +2: the item's direct paragraph, then that paragraph's inline.
-            items[stack[-1]].append(_join_lines(token.content))
+            items[open_items[-1]].append(_join_lines(token.content))
         depth += token.nesting
     return tuple(" ".join(parts) for parts in items)
 
 
-# A flat dispatch table written as ifs — the order *is* the documentation, so it
-# does not get split to satisfy a return-count threshold.
+# A flat dispatch table written as ifs — the order *is* the documentation.
 def _leaf_entity(  # ruff: ignore[too-many-return-statements]
     span: list[Token], line: int, counter: _Counter, feed: _RefFeed
 ) -> Entity | None:
-    """Map one non-heading span onto an entity, or ``None`` if it addresses nothing."""
     head = span[0]
     if head.type == "paragraph_open":
         text = _join_lines(_inline_text(span))
@@ -375,7 +338,7 @@ def _leaf_entity(  # ruff: ignore[too-many-return-statements]
             lang=lang or None,
             lines=_content_lines(head.content),
         )
-    if head.type == "code_block":  # indented — the parser has stripped the indent
+    if head.type == "code_block":  # indented — the parser stripped the indent already
         return CodeBlock(
             index=counter.next("C"), line=line, lang=None, lines=_content_lines(head.content)
         )
@@ -390,9 +353,8 @@ def _leaf_entity(  # ruff: ignore[too-many-return-statements]
         inner = _parse_container(_spans(span[1:-1]), feed.split(end))
         return Quote(index=counter.next("Q"), line=line, entities=tuple(inner))
     if head.type == "hr":
-        return None  # a thematic break is a visual rule: no content, no address
-    # _MD's rule set emits nothing else. Should it ever, keep the bytes rather
-    # than drop them — a verbatim block is the lossless default.
+        return None  # a visual rule: no content, no address
+    # _MD emits nothing else; should it ever, keep the bytes rather than drop them.
     return CodeBlock(
         index=counter.next("C"), line=line, lang=None, lines=_content_lines(head.content)
     )
@@ -403,11 +365,8 @@ def _opens_sibling_section(head: Token, level: int) -> bool:
 
 
 def _parse_container(spans: list[list[Token]], feed: _RefFeed) -> list[Entity]:
-    """Walk one container's spans into ordered entities (leaves, quotes, subsections).
-
-    Every line comes from the token's own ``map`` and is already absolute in the
-    source, so nothing is threaded through the recursion but the reference feed.
-    """
+    """Lines come from the tokens' own maps and are already absolute, so nothing is
+    threaded through the recursion but the reference feed."""
     entities: list[Entity] = []
     counter = _Counter()
     lines = _span_lines(spans)
@@ -443,11 +402,8 @@ def _parse_container(spans: list[list[Token]], feed: _RefFeed) -> list[Entity]:
 
 
 def decompose(markdown: str) -> Message:
-    """Decompose ``markdown`` into a :class:`Message` tree.
-
-    Content before the first heading (or a message with no headings) forms an
-    implicit section ``S1``; each top-level heading is a subsequent section.
-    """
+    """Content before the first heading forms an implicit ``S1``; each top-level
+    heading is a subsequent section."""
     env: dict[str, Any] = {}
     tokens = _MD.parse(markdown, env)
     top = _parse_container(_spans(tokens), _RefFeed(_collect_references(env)))

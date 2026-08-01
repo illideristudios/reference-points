@@ -20,15 +20,23 @@ wrong guess.
 ```bash
 uv sync                                   # install (Python 3.13, dev tools)
 
-# label a message with its addresses
+# label a message with its addresses (--turn N, --glyphs)
 uv run python -m reference_points label message.md
+
+# the compact address→excerpt overlay instead
+uv run python -m reference_points map message.md
 
 # resolve an address against a message → prints the referenced content
 uv run python -m reference_points resolve 'N1-S1.T2.3' message.md
 
 # validate an address string on its own
 uv run python -m reference_points parse 'N1-S1.P2.4'
+
+# print the Section/Entity tree
+uv run python -m reference_points decompose message.md
 ```
+
+Any `<file>` may be `-` to read from stdin.
 
 ## The grammar
 
@@ -37,7 +45,7 @@ An address is `<N>-<S>.<E>.<L>` — **turN · Section · Entity · Location**.
 | Part | Meaning | Notes |
 |------|---------|-------|
 | `N<n>` | turn number | **mandatory** — an N-less address is rejected |
-| `S<n>` | section (markdown heading; whole msg = `S1` if none) | container; nests |
+| `S<n>` | section (markdown heading, ATX or setext; whole msg = `S1` if none) | container; nests |
 | `E<n>` | entity, indexed per type within its section | see table below |
 | `L`   | location inside the entity | shape depends on entity type |
 
@@ -69,10 +77,11 @@ Instead of a numeric location you can address by content:
 
 A match can also stand in for an entity's **index**: `R(/mdit/)` is the reference
 whose definition matches, `P(/caching/)` the paragraph about caching, and
-`R(g/https/)` is every reference that matches. An `R` selector runs against the
-whole definition, so `(/mdit/)` finds it by key and
-`(/github.com/)` by URL, and it follows CommonMark label normalization: `[MDIT]`,
-`[ mdit ]` and `[mdit]` are one reference.
+`R(g/https/)` every reference that matches. A selector takes no further location.
+
+An `R` selector runs against the whole definition, so `(/mdit/)` finds it by key
+and `(/github.com/)` by URL, and it follows CommonMark label normalization:
+`[MDIT]`, `[ mdit ]` and `[mdit]` are one reference.
 
 ### How labels are rendered
 
@@ -104,12 +113,14 @@ line after it rather than corrupting the construct.
 
 ## Rejection is loud
 
-A malformed or unresolvable address never guesses. It names the defect:
+A malformed or unresolvable address never guesses. It names the defect (the CLI
+prefixes these with `error: ` and exits non-zero):
 
-- `REJECTED: missing turn number` — no `N`.
-- `REJECTED: D1 has no location` — diagram addressed with a location.
-- `AMBIGUOUS: 3 matches for (/scheme/)` — single-match string hit more than once.
-- `no such row 9 in T2` — location out of range.
+- `missing turn number` — no `N`.
+- `D1 takes no location` — diagram addressed with a location.
+- `AMBIGUOUS: 3 matches for (/scheme/) in T2` — a single-match string hit more than once.
+- `no such row 9 in T2 (has 4)` — location out of range.
+- `no T2 here` — the entity does not exist in that section.
 
 ## Development
 

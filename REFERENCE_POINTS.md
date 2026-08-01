@@ -109,9 +109,12 @@ entity.
    none, and it would stop the line being a definition, turning every `[key]` in
    the labeled copy into literal text. `render_inline` leaves those lines
    byte-identical to the source; `render_map` carries their addresses.
-6. **Rejection UX?** Fail loud, name the defect, wait — never guess. Examples:
-   `REJECTED: missing turn number`, `REJECTED: D1 takes no location`,
-   `AMBIGUOUS: 3 matches for (/scheme/)`, `no such row 9 in T2`.
+6. **Rejection UX?** Fail loud, name the defect, wait — never guess. `parse_ref`
+   raises `RefError`, `resolve` raises `ResolveError`, and the CLI prints
+   `error: <message>` on stderr with exit 1. Actual messages:
+   `missing turn number`, `D1 takes no location`,
+   `AMBIGUOUS: 3 matches for (/scheme/) in T2`, `no such row 9 in T2 (has 4)`,
+   `no T2 here`.
 
 ## Rendering model (why source-parsing is sound)
 
@@ -240,8 +243,8 @@ Addresses that resolve against it:
 | `N27-S1.T1.4,2` | `$40` |
 | `N27-S1.T1.(/Team/)` | the Team row (unique match) |
 | `N27-S1.P2.1` | `Enterprise pricing is negotiated separately.` |
-| `N27-S1.D1` | `REJECTED: no diagram in section 1` |
-| `S1.P1` | `REJECTED: missing turn number` |
+| `N27-S1.D1` | `no D1 here` |
+| `S1.P1` | `missing turn number` |
 
 Table rows are 1-indexed **including the header row**, so `T1.1` is the header and
 `T1.4` is the third data row. Columns are 1-indexed left to right.

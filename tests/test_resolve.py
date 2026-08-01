@@ -39,7 +39,7 @@ def test_resolves_a_row_by_unique_match(worked_msg: Message) -> None:
 
 
 def test_ambiguous_single_match_fails_loudly(worked_msg: Message) -> None:
-    # `$` is now an end-anchor under regex; the literal dollar is `\$`.
+    # `$` is an end-anchor under regex; the literal dollar is `\$`.
     with pytest.raises(ResolveError, match="AMBIGUOUS: 3 matches"):
         resolve(parse_ref(r"N27-S1.T1.(/\$/)"), worked_msg)
 
@@ -55,18 +55,18 @@ def test_no_match_fails_loudly(worked_msg: Message) -> None:
 
 
 def test_regex_metacharacter_matches(worked_msg: Message) -> None:
-    # `(/…/)` is a regex, so `.` is any-char: `F.ee` matches the "Free" row.
+    # A regex, so `.` is any-char.
     assert resolve(parse_ref("N27-S1.T1.(/F.ee/)"), worked_msg).content == "| Free | $0 | 1 |"
 
 
 def test_match_is_case_sensitive(worked_msg: Message) -> None:
-    # No implicit `i` flag: lowercase `free` does not match "Free".
+    # No implicit `i` flag.
     with pytest.raises(ResolveError, match="no match"):
         resolve(parse_ref("N27-S1.T1.(/free/)"), worked_msg)
 
 
 def test_inline_flag_enables_case_insensitivity(worked_msg: Message) -> None:
-    # Flags ride inside the pattern: `(?i:…)` makes `free` match "Free".
+    # Flags ride inside the pattern.
     assert resolve(parse_ref("N27-S1.T1.(/(?i:free)/)"), worked_msg).content == "| Free | $0 | 1 |"
 
 
@@ -76,7 +76,7 @@ def test_invalid_regex_fails_loudly(worked_msg: Message) -> None:
 
 
 def test_location_and_match_compose_within_a_sentence(worked_msg: Message) -> None:
-    # Location narrows to sentence 2, then the regex matches *within* it.
+    # The location narrows first, then the regex matches within it.
     assert (
         resolve(parse_ref("N27-S1.P1.2(/current/)"), worked_msg).content
         == "Here is the current breakdown."
@@ -84,7 +84,7 @@ def test_location_and_match_compose_within_a_sentence(worked_msg: Message) -> No
 
 
 def test_composed_match_that_misses_the_located_scope_fails(worked_msg: Message) -> None:
-    # "tiers" lives in sentence 1, so scoping the regex to sentence 2 is a loud no-match.
+    # "tiers" lives in sentence 1, so scoping to sentence 2 is a loud no-match.
     with pytest.raises(ResolveError, match="no match"):
         resolve(parse_ref("N27-S1.P1.2(/tiers/)"), worked_msg)
 
@@ -156,7 +156,7 @@ def test_resolves_an_html_line_by_match() -> None:
 
 
 def test_a_verbatim_block_is_not_addressable_as_prose() -> None:
-    # It used to resolve as P1 with the lines joined into a "sentence".
+    # Prose treatment would join its lines into a "sentence".
     msg = decompose("<details>\n<summary>Click to expand</summary>\n")
     with pytest.raises(ResolveError, match="no P1 here"):
         resolve(parse_ref("N1-S1.P1"), msg)
@@ -196,7 +196,7 @@ def test_index_and_key_name_the_same_reference() -> None:
 
 
 def test_a_reference_selector_matches_the_destination_too() -> None:
-    # One match against the whole definition — no special case for key vs URL.
+    # One match against the whole definition; no special case for key vs URL.
     msg = decompose(REFS_MD)
     assert resolve(parse_ref("N1-S1.R(/commonmark/)"), msg).content.startswith("[SPEC]:")
 
@@ -243,6 +243,6 @@ def test_reference_lookup_is_section_scoped() -> None:
 
 
 def test_a_match_selects_a_paragraph_by_its_content(worked_msg: Message) -> None:
-    # The generalization is not R-specific: any letter may be selected by match.
+    # Not R-specific: any letter may be selected by match.
     result = resolve(parse_ref("N27-S1.P(/Enterprise/)"), worked_msg)
     assert result.content == "Enterprise pricing is negotiated separately."

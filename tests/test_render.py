@@ -40,8 +40,7 @@ def test_message_with_no_heading_gets_a_turn_marker() -> None:
 
 
 def test_render_map_lists_every_addressable_block(worked_msg: Message) -> None:
-    # The map is a standalone index, not a renderable copy of the message — it
-    # carries no heading markers.
+    # A standalone index, not a renderable copy: no heading markers.
     out = render_map(worked_msg, turn=27)
     assert "N27-S1 Costs" in out
     assert "## N27-S1" not in out
@@ -51,8 +50,7 @@ def test_render_map_lists_every_addressable_block(worked_msg: Message) -> None:
 
 
 def test_labeling_preserves_every_heading_level() -> None:
-    # A labeled message must still render as markdown: keep the ATX markers so a
-    # heading stays a heading instead of collapsing into a paragraph.
+    # Drop the ATX markers and every heading collapses into a paragraph.
     msg = decompose("# One\n\nalpha.\n\n### Three\n\nbeta.\n\n###### Six\n\ngamma.\n")
     out = render_inline(msg, turn=9)
     assert "# N9-S1 One" in out
@@ -61,10 +59,9 @@ def test_labeling_preserves_every_heading_level() -> None:
 
 
 def test_position_sensitive_blocks_keep_their_own_label_line() -> None:
-    # These first lines mean something *because* of their leading characters, so
-    # the label goes on its own line above — and the blank line after it is
-    # load-bearing, or the construct below becomes a lazy continuation of the
-    # label's own paragraph.
+    # These first lines mean something *because* of their leading characters. The
+    # blank line after the label is load-bearing: without it the construct below
+    # becomes a lazy continuation of the label's own paragraph.
     for source, first_line in (
         ("alpha.\n\n    indented code\n", "    indented code"),
         ("alpha.\n\n<details>\n<summary>s</summary>\n", "<details>"),
@@ -100,7 +97,7 @@ def test_ordinary_paragraph_label_stays_inline() -> None:
 
 
 def test_implicit_section_marker_is_not_a_heading() -> None:
-    # No heading line to preserve — the marker is plain text, so no '#' invented.
+    # No heading line to preserve, so no '#' is invented.
     msg = decompose("Just a paragraph.\n")
     assert render_inline(msg, turn=9).splitlines()[0] == "N9-S1"
 
@@ -119,19 +116,18 @@ def test_glyph_style_applies_to_the_map_too(worked_msg: Message) -> None:
 
 
 def test_glyph_labels_resolve_back(worked_msg: Message) -> None:
-    # The round-trip invariant must hold in whichever style emitted the label.
+    # The round-trip must hold in whichever style emitted the label.
     out = render_inline(worked_msg, turn=27, style=GLYPH)
     assert out.splitlines()[0] == "## ◆27 §1 Costs"
     assert resolve(parse_ref("◆27 §1 ·T1.4,2"), worked_msg).content == "$40"
 
 
 def test_glyph_addresses_still_parse(worked_msg: Message) -> None:
-    # Labels are ASCII now, but old transcripts are full of glyph-form addresses.
+    # Old transcripts are full of glyph-form addresses.
     assert resolve(parse_ref("◆27 §1 ·T1.4,2"), worked_msg).content == "$40"
 
 
 def test_every_emitted_label_resolves_back(worked_msg: Message) -> None:
-    # Round-trip invariant: the canonical address of every leaf entity resolves.
     for section in worked_msg.sections:
         for entity in section.entities:
             letter = type(entity).__name__[0]
@@ -171,8 +167,8 @@ def test_reference_definition_lines_render_byte_identical_to_the_source() -> Non
 
 
 def test_a_labeled_copy_still_defines_its_links() -> None:
-    # The real invariant behind the byte-identical rule: label the message and the
-    # parser must still collect the definition, or every `[mdit]` renders as text.
+    # The invariant behind the byte-identical rule: still a definition after
+    # labeling, or every `[mdit]` renders as text.
     md = MarkdownIt("commonmark")
 
     def definitions(markdown: str) -> dict[str, str]:
@@ -206,9 +202,8 @@ _STRUCTURAL = frozenset({
 
 
 def _skeleton(markdown: str) -> list[tuple[str, str]]:
-    """The block skeleton of a document: the structural tokens in order, with the
-    bytes of every verbatim block. This is the render-and-diff ritual CLAUDE.md
-    mandates, run against the parser the decomposer itself depends on."""
+    """Structural tokens in order, with the bytes of every verbatim block — the
+    render-and-diff ritual CLAUDE.md mandates, in the parser we already depend on."""
     tokens = MarkdownIt("commonmark").enable("table").parse(markdown)
     return [
         (t.type, t.content if t.type in {"fence", "code_block", "html_block"} else t.tag)
@@ -238,8 +233,8 @@ def _addresses(entities: tuple[Entity, ...], prefix: str) -> list[tuple[str, Ent
 def test_every_address_in_the_torture_document_resolves_to_its_own_entity(
     torture_msg: Message,
 ) -> None:
-    # Stronger than "must not raise": an off-by-one inside a blockquote or a list
-    # resolves to the wrong block, and only comparing content catches that.
+    # Stronger than "must not raise": an off-by-one inside a blockquote resolves
+    # to the wrong block without raising. Only comparing content catches it.
     checked = 0
     for section in torture_msg.sections:
         for address, entity in _addresses(section.entities, f"N1-S{section.index}"):

@@ -1,5 +1,5 @@
-"""Shared fixtures — the worked example from REFERENCE_POINTS.md, and the
-torture document that exercises every construct the parser has to get right."""
+"""Shared fixtures — the worked example from REFERENCE_POINTS.md, and the torture
+document that exercises every construct the parser has to get right."""
 
 from __future__ import annotations
 

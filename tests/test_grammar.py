@@ -80,7 +80,7 @@ def test_match_string_may_contain_dots() -> None:
 
 
 def test_location_and_match_compose() -> None:
-    # `[location]` and `[regex]` are orthogonal, separate fields — they compose.
+    # Orthogonal, separate fields — they compose.
     ref = parse_ref("N27-S1.P1.2(/foo/)")
     assert ref.location == 2
     assert ref.match == MatchLoc("foo", every=False)
@@ -92,7 +92,7 @@ def test_match_on_cell_reference_is_rejected() -> None:
 
 
 def test_match_binds_without_a_dot() -> None:
-    # `p1(/rx/)` is the canonical no-dot form; the dot is optional/tolerated.
+    # The no-dot form is canonical; the dot is tolerated.
     assert parse_ref("N1-S1.P1(/x/)") == parse_ref("N1-S1.P1.(/x/)")
 
 
@@ -124,14 +124,14 @@ def test_a_match_may_select_the_entity_instead_of_an_index() -> None:
 
 
 def test_entity_selection_by_match_is_not_reference_specific() -> None:
-    # The same relaxation for every letter: the paragraph about caching.
+    # The same relaxation for every letter.
     ref = parse_ref("N1-S1.P(/caching/)")
     assert ref.path == (EntityStep("P", None),)
     assert ref.match == MatchLoc("caching", every=False)
 
 
 def test_a_global_match_may_select_entities() -> None:
-    # `g` means "every match in scope" here as it does anywhere else.
+    # `g` means "every match in scope" here as anywhere else.
     ref = parse_ref("N1-S1.R(g/https/)")
     assert ref.path == (EntityStep("R", None),)
     assert ref.match == MatchLoc("https", every=True)

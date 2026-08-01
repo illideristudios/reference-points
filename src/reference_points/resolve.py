@@ -1,9 +1,8 @@
 """Resolve a parsed :class:`Ref` against a decomposed :class:`Message`.
 
-Walks the decomposition to the addressed node and returns its content, or raises
-:class:`ResolveError` naming the miss (out of range, no match, ambiguous). The
-turn number is the caller's concern — it selects *which* message to decompose;
-resolution works within that one message via section · path · location.
+Walks to the addressed node and returns its content, or raises
+:class:`ResolveError` naming the miss. The turn number is the caller's concern: it
+selects *which* message to decompose, and everything here is within that one.
 """
 
 from __future__ import annotations
@@ -46,7 +45,7 @@ class ResolveError(Exception):
 
 @dataclass(frozen=True)
 class Resolution:
-    """A successful lookup: what kind of node, and its content."""
+    """What kind of node, and its content."""
 
     kind: str
     content: str
@@ -62,11 +61,8 @@ def _fmt_match(match: MatchLoc) -> str:
 
 
 def _compile(match: MatchLoc, *, ignore_case: bool = False) -> re.Pattern[str]:
-    """Compile the match body as a regex, failing loud on a malformed pattern.
-
-    ``ignore_case`` is for selecting a :class:`Reference`: CommonMark normalizes
-    link labels case-insensitively, so ``(/mdit/)`` must name ``[MDIT]``.
-    """
+    """``ignore_case`` is for a :class:`Reference`: CommonMark normalizes link
+    labels case-insensitively, so ``(/mdit/)`` must name ``[MDIT]``."""
     try:
         return re.compile(match.text, re.IGNORECASE if ignore_case else 0)
     except re.error as err:
@@ -84,9 +80,8 @@ def _apply_match(matches: list[str], match: MatchLoc, scope: str) -> str:
 
 
 def _narrow(units: tuple[str, ...], location: Location, kind: str, label: str) -> tuple[str, ...]:
-    """Candidate sub-units for a content match: the one at ``location`` (a single
-    number) or all of them (``location`` absent). Cell/column locations never reach
-    here — the grammar rejects composing a match with them."""
+    """Candidates for a content match: the one at ``location``, or all of them.
+    Cell/column locations never reach here — the grammar rejects those."""
     if location is None:
         return units
     if not isinstance(location, int) or not 1 <= location <= len(units):
@@ -116,19 +111,15 @@ def _find_entity(entities: tuple[Entity, ...], letter: str, index: int) -> Entit
 
 
 def _entity_text(entity: Entity) -> str:
-    """An entity's whole content — what a selector match is tested against."""
+    """What a selector match is tested against."""
     return resolve_entity(entity, None, None).content
 
 
 def _select_entities(
     entities: tuple[Entity, ...], step: EntityStep, match: MatchLoc | None
 ) -> list[Entity]:
-    """The entities a step names: the one at ``step.index``, or — when the step
-    carries no index — those of its type whose content matches.
-
-    The two match forms mean here what they mean everywhere else: ``(/…/)`` names
-    the single hit and is ``AMBIGUOUS`` on more, ``(g/…/)`` names every hit.
-    """
+    """With no index the match picks among entities of that type: ``(/…/)`` is
+    ``AMBIGUOUS`` on more than one hit, ``(g/…/)`` names every hit."""
     if step.index is not None:
         return [_find_entity(entities, step.letter, step.index)]
     if match is None:  # parse_ref forbids this; keep the walk total, never guess
@@ -145,11 +136,8 @@ def _select_entities(
 
 
 def _walk(section: Section, ref: Ref) -> list[Entity]:
-    """The addressed entities — one, unless a terminal ``(g/…/)`` selected several.
-
-    Only the terminal step may be selected by a match, so every step that is
-    descended into names exactly one container.
-    """
+    """One entity, unless a terminal ``(g/…/)`` selected several — only the terminal
+    step may carry a match, so every step descended into names one container."""
     current: list[Entity] = [section]
     entities = section.entities
     for i, step in enumerate(ref.path):
@@ -234,9 +222,7 @@ def _resolve_container(entity: Section | Quote, location: Location) -> Resolutio
 def resolve_entity(  # ruff: ignore[too-many-return-statements]
     entity: Entity, location: Location, match: MatchLoc | None
 ) -> Resolution:
-    """Apply ``location`` (structural) and ``match`` (content regex) to an
-    already-located ``entity``. They compose: the location narrows the scope, the
-    match then filters within it. Either may be absent."""
+    """They compose: the location narrows the scope, the match filters within it."""
     if isinstance(entity, Paragraph):
         return _resolve_paragraph(entity, location, match)
     if isinstance(entity, Table):
@@ -253,12 +239,11 @@ def resolve_entity(  # ruff: ignore[too-many-return-statements]
 
 
 def resolve(ref: Ref, msg: Message) -> Resolution:
-    """Resolve ``ref`` against ``msg`` or raise :class:`ResolveError` naming the miss."""
     section = _find_section(msg, ref.section if ref.section is not None else 1)
     targets = _walk(section, ref)
     if ref.path and ref.path[-1].index is None:
-        # The match chose the entities; it does not also narrow inside them. A
-        # global selector joins them, exactly as a global location joins its rows.
+        # Spent on choosing the entities, the match does not also narrow inside
+        # them; a global one joins, as a global location joins its rows.
         parts = [resolve_entity(entity, None, None) for entity in targets]
         return Resolution(parts[0].kind, "\n".join(part.content for part in parts))
     return resolve_entity(targets[0], ref.location, ref.match)
