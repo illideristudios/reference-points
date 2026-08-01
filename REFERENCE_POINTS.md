@@ -151,6 +151,29 @@ entity.
    is impossible without seeing them. The CLI prints it unchanged and exits 1 — a
    file it cannot read is `UNREADABLE:`, outside the four, being no address defect.
 
+## Not built: transcript mode
+
+Everything above works on **one message at a time**. `decompose(md, turn=27)` is
+handed the text and told which turn it is, which makes `N` a *check* rather than a
+*lookup*: it catches an address aimed at another turn, but it cannot go and find
+that turn. Reading a whole transcript is the obvious next step, and is
+deliberately not built. Roughly what it needs:
+
+- **A transcript reader.** There is no format here, and choosing one is the real
+  decision — the engine has no opinion about how a conversation is stored and
+  should not grow one casually.
+- **Resolution across turns.** `resolve` picking the message by `ref.turn`
+  instead of being handed it. At that point `N` does the job it was designed for
+  and a bare `N27-S1.P1` is complete on its own, with no `--turn` beside it.
+- **A viewer.** Labels are worth nothing you cannot see. A per-message
+  `render_inline` does not give you a labeled conversation to read and point into,
+  and that is where most of the value is.
+
+None of this changes the grammar, which is why it is a note and not a design.
+Nothing has been built toward it: `Message.turn` is the only piece already in
+place, and it is there because the wrong-turn check needs it today, not as a hook
+for this.
+
 ## Rendering model (why source-parsing is sound)
 
 Everything the assistant writes is GitHub-flavored markdown rendered in a
