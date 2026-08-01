@@ -43,12 +43,14 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
   `__main__.py` (CLI only).
 - One test module per source module: `tests/test_<module>.py`.
 - Dataclasses for AST nodes; `pathlib` for file I/O.
-- **The Claude Code plugin lives under `plugin/`**, with the marketplace manifest
-  at `.claude-plugin/marketplace.json` in the repo root. `plugin/bin/` is put on
-  `PATH` by installing the plugin, and `plugin/bin/reference-points` runs this
-  checkout through `uv run --frozen --no-dev --project` — so there is no second
-  copy of the engine to keep in sync and no install step beyond the plugin. Ship
-  behaviour in `src/`; `plugin/` holds only the skill and the two launchers.
+- **The repo root *is* the Claude Code plugin** — `.claude-plugin/` holds both
+  `marketplace.json` (`"source": "./"`) and `plugin.json`, with `bin/` and
+  `skills/` beside `src/`. Not a `plugin/` subdirectory: Claude Code copies only
+  the plugin directory into its cache, so a plugin under `plugin/` arrives
+  without `pyproject.toml`, `uv.lock` or `src/`, and `bin/reference-points` —
+  which runs the checkout through `uv run --frozen --no-dev --project` — has no
+  engine to run. Keeping them together is also what stops a second copy of the
+  engine existing to drift from this one.
 
 ## Documentation Checklist (Required with Every Code Change)
 1. **README.md** — repo root (always required; human-facing; grammar table stays in sync with `grammar.py`).

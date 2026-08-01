@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
-# Run the reference-points CLI straight out of this repo.
+# Run the reference-points CLI straight out of this checkout.
 #
 # Touches: the uv-managed virtualenv for this project, created on first call.
 # Does NOT install anything on PATH, write any config, or read the transcript
 # itself — Claude Code puts this directory on PATH by installing the plugin,
 # which is the whole install.
 #
+# The plugin is the repo root, not a subdirectory, precisely so that pyproject
+# .toml / uv.lock / src/ travel with it: Claude Code copies only the plugin
+# directory into its cache, and a plugin under plugin/ would arrive without the
+# engine it exists to run.
+#
 # --frozen so the committed uv.lock decides the versions and a call never
 # re-resolves; --no-dev so the CLI does not drag in pytest, ruff and pyright.
 set -euo pipefail
 
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "reference-points: 'uv' is not on PATH — see https://docs.astral.sh/uv/" >&2

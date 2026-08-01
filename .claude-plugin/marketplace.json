@@ -10,7 +10,7 @@
       "name": "reference-points",
       "description": "The reference-points skill and CLI: N27-S1.T2.3 resolves to turn 27, section 1, table 2, row 3 of a real Claude Code transcript, or fails with a named category and a remedy. Runs out of this repo through uv — no separate install step.",
       "version": "0.1.0",
-      "source": "./plugin",
+      "source": "./",
       "author": {
         "name": "Zach Gardner",
         "email": "locriani@gmail.com"

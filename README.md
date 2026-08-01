@@ -78,7 +78,7 @@ reference-points resolve 'N27-S1.T2.3' "$S" -T    # the block turn 27 pointed at
 reference-points turns "$S"                       # replies so far
 ```
 
-The bundled [`reference-points` skill](plugin/skills/reference-points/SKILL.md)
+The bundled [`reference-points` skill](skills/reference-points/SKILL.md)
 fires when an address appears in a message, and makes the assistant *resolve* it
 rather than remember what a turn said — which is the failure the grammar exists
 to remove, one level up.
