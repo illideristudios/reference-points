@@ -71,11 +71,17 @@ Pass `--glyphs` for the monochrome set instead:
 
 | Style | Section header | Block |
 |-------|----------------|-------|
-| ASCII (default) | `N27-S1 Costs` | `.P1` |
-| `--glyphs` | `◆27 §1 Costs` | `·P1` |
+| ASCII (default) | `## N27-S1 Costs` | `.P1` |
+| `--glyphs` | `## ◆27 §1 Costs` | `·P1` |
 
 The choice is display-only: `parse_ref` accepts **both** forms, so a label
 resolves in whichever style emitted it.
+
+**A labeled message still renders as markdown.** Heading markers are kept, so a
+heading stays a heading; and where a first line means what it means because of
+its leading characters — an indented code block, a `---` thematic break, an HTML
+block — the label moves to its own line with a blank line after it rather than
+corrupting the construct.
 
 ## Rejection is loud
 

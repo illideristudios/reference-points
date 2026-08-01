@@ -106,6 +106,26 @@ Two tiers, independent of the marker set:
 
 Full paths are for *references*; fragments are for *labels*.
 
+### A labeled message must still render as markdown
+
+Labels are added to the source; they must never change what it renders to. Two
+rules follow, and both are load-bearing:
+
+1. **Heading markers are preserved.** A section label rebuilds the line with its
+   original ATX markers — `## N27-S1 Costs`, not `N27-S1 Costs`. Dropping them
+   collapses every heading in the message into a paragraph.
+2. **A position-sensitive first line gets its label on its own line, followed by
+   a blank line.** A paragraph label is normally an inline prefix, but an
+   indented code block, a thematic break (`---`, `***`, `___`), and the start of
+   an HTML block all mean what they mean *because of* their leading characters.
+   Prefixing destroys them. The blank line matters as much as the placement:
+   without it the construct below becomes a lazy continuation of the label's
+   paragraph, which turns `---` into a setext heading and an indented block into
+   prose.
+
+Verified by rendering the source and the labeled copy through a GFM renderer and
+diffing the block skeletons.
+
 **Marker set is an option.** ASCII is the default; `--glyphs` selects the
 monochrome set — no color, no emoji. Redundant role letters are dropped in the
 glyph form (`◆27`, not `◆N27`).
@@ -144,12 +164,13 @@ Enterprise pricing is negotiated separately.
 ```
 
 `render_inline` output (turn 27) — labels are **injected into the original
-source**, preserving your exact formatting (the heading line is rewritten to the
-turn/section marker, a paragraph label goes inline, a block entity's label sits on
-its own line above the block, blank lines are kept):
+source**, preserving your exact formatting: the heading keeps its `##` and gains
+the section marker, a paragraph label goes inline, a block entity's label sits on
+its own line above the block, blank lines are kept. The result still renders as
+markdown:
 
 ```
-N27-S1 Costs
+## N27-S1 Costs
 
 .P1 The pricing tiers changed last quarter. Here is the current breakdown.
 
