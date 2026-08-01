@@ -64,6 +64,22 @@ records the answer on the `Message`. Two things follow, and both are load-bearin
    fragment by design (`.P1`, `·T2`) — only a section header carries the full
    prefix. Without a supplied turn those labels are unresolvable without being
    re-typed, which breaks the round-trip the whole engine rests on.
+
+   A fragment names no scope, so it is looked for in **every** container at every
+   depth — which is the only way a label printed inside a subsection resolves at
+   all. Nesting can therefore print the same fragment twice, and when it does the
+   fragment is `AMBIGUOUS`, listing each candidate with its qualified address:
+
+   ```
+   AMBIGUOUS: 2 blocks are labeled .P1
+        N1-S1.P1 Alpha alpha.
+        N1-S1.S1.P1 Bravo bravo.
+     -> use N1-S1.P1 or N1-S1.S1.P1
+   ```
+
+   Assuming the shallowest one is a guess, and a guess here returns a different
+   block while raising nothing. A **qualified** address names its own scope, so it
+   is never a search and never ambiguous.
 2. **An address for another turn is a miss.** `ref.turn` used to be parsed and
    discarded, so `N27-S1.P1` resolved happily against turn 5's message and
    returned turn 5's first paragraph — silent mis-resolution, arriving through

@@ -48,6 +48,10 @@ _LETTER_TO_TYPE: dict[str, type[Entity]] = {
     "S": Section,
 }
 
+_TYPE_TO_LETTER: dict[type[Entity], str] = {
+    entity: letter for letter, entity in _LETTER_TO_TYPE.items()
+}
+
 
 class ResolveError(Exception):
     """A well-formed address that points at nothing, at more than one thing, or at
@@ -219,11 +223,15 @@ def _select_entities(
     return hits
 
 
-def _walk(section: Section, ref: Ref) -> list[Entity]:
+def _walk(container: Section | Quote, ref: Ref) -> list[Entity]:
     """One entity, unless a terminal ``(g/…/)`` selected several — only the terminal
-    step may carry a match, so every step descended into names one container."""
-    current: list[Entity] = [section]
-    entities = section.entities
+    step may carry a match, so every step descended into names one container.
+
+    Starts from any container, not only a section: a fragment is looked for in each
+    of them, since a label never says which one it was printed in.
+    """
+    current: list[Entity] = [container]
+    entities = container.entities
     for i, step in enumerate(ref.path):
         current = _select_entities(entities, step, ref.match)
         if i < len(ref.path) - 1:
@@ -236,6 +244,81 @@ def _walk(section: Section, ref: Ref) -> list[Entity]:
                 )
             entities = inner.entities
     return current
+
+
+def _finish(targets: list[Entity], ref: Ref) -> Resolution:
+    if ref.path and ref.path[-1].index is None:
+        # Spent on choosing the entities, the match does not also narrow inside
+        # them; a global one joins, as a global location joins its rows.
+        parts = [resolve_entity(entity, None, None) for entity in targets]
+        return Resolution(parts[0].kind, "\n".join(part.content for part in parts))
+    return resolve_entity(targets[0], ref.location, ref.match)
+
+
+def _fragment_form(ref: Ref) -> str:
+    """The fragment as a label prints it: ``.P1``, ``.S1.P1``."""
+    return "".join(
+        f".{step.letter}{step.index if step.index is not None else ''}" for step in ref.path
+    )
+
+
+def _scopes(msg: Message) -> list[tuple[str, Section | Quote]]:
+    """Every container a fragment could have been read inside, with the full
+    address of each.
+
+    A block label carries only its fragment, never its path — so a fragment names
+    whatever container the reader was looking at, which is any of these. Assuming
+    section 1 is how the same ``.P1`` printed twice used to return the shallower
+    block without raising.
+    """
+    found: list[tuple[str, Section | Quote]] = []
+
+    def descend(container: Section | Quote, prefix: str) -> None:
+        found.append((prefix, container))
+        for entity in container.entities:
+            if isinstance(entity, Section | Quote):
+                descend(entity, f"{prefix}.{_TYPE_TO_LETTER[type(entity)]}{entity.index}")
+
+    for section in msg.sections:
+        descend(section, f"N{msg.turn}-S{section.index}")
+    return found
+
+
+def _or(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} or {items[-1]}"
+
+
+def _resolve_fragment(ref: Ref, msg: Message) -> Resolution:
+    """A fragment against every container that could have printed it.
+
+    One candidate resolves as written. More than one is the ``AMBIGUOUS`` the
+    grammar already defines — well-formed, and more than one thing is there —
+    listed with the qualified address of each, since choosing between them is
+    impossible without seeing them.
+    """
+    candidates: list[tuple[str, list[Entity]]] = []
+    for prefix, scope in _scopes(msg):
+        try:
+            candidates.append((prefix, _walk(scope, ref)))
+        except ResolveError:
+            continue  # not in this container; another may still hold it
+    if not candidates:
+        # Nothing anywhere: raise the miss from the scope a reader assumes, so the
+        # inventory names what is in front of them.
+        return _finish(_walk(_find_section(msg, 1), ref), ref)
+    if len(candidates) > 1:
+        form = _fragment_form(ref)
+        addresses = [f"{prefix}{form}" for prefix, _ in candidates]
+        shown = [
+            f"{address}  {_entity_text(targets[0])}"
+            for address, (_, targets) in zip(addresses, candidates, strict=True)
+        ]
+        raise ResolveError(
+            AMBIGUOUS,
+            f"{len(candidates)} blocks are labeled {form}\n{_listing(shown)}",
+            f"use {_or(addresses[:_SHOWN])}",
+        )
+    return _finish(candidates[0][1], ref)
 
 
 def _resolve_paragraph(para: Paragraph, location: Location, match: MatchLoc | None) -> Resolution:
@@ -382,11 +465,7 @@ def resolve(ref: Ref, msg: Message) -> Resolution:
             f"address is for turn {ref.turn}; this message is turn {msg.turn}",
             f"resolve it against turn {ref.turn}, or re-address it to N{msg.turn}",
         )
-    section = _find_section(msg, ref.section if ref.section is not None else 1)
-    targets = _walk(section, ref)
-    if ref.path and ref.path[-1].index is None:
-        # Spent on choosing the entities, the match does not also narrow inside
-        # them; a global one joins, as a global location joins its rows.
-        parts = [resolve_entity(entity, None, None) for entity in targets]
-        return Resolution(parts[0].kind, "\n".join(part.content for part in parts))
-    return resolve_entity(targets[0], ref.location, ref.match)
+    if ref.section is None and ref.path:
+        # A fragment names no scope, so it is looked for in all of them.
+        return _resolve_fragment(ref, msg)
+    return _finish(_walk(_find_section(msg, ref.section or 1), ref), ref)

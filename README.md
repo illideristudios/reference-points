@@ -123,6 +123,12 @@ Pass `--glyphs` for the monochrome set instead:
 The choice is display-only: `parse_ref` accepts **both** forms, so a label
 resolves in whichever style emitted it.
 
+Because a fragment carries no path, it is looked for in every container at every
+depth — that is what lets a label printed inside a subsection resolve at all. When
+nesting prints the same fragment twice, typing it is `AMBIGUOUS` and both
+candidates come back with their full addresses; the engine never picks the
+shallower one for you. A full address names its own scope and is never a search.
+
 Anything under `C` is stored **byte-for-byte** and addressed by line or by
 `(/match/)` — never split into sentences. A thematic break (`---`, `***`) is not
 an entity: no content, no address, no label.
@@ -157,6 +163,11 @@ MISSING: no T2 here
 
 MISSING: no such row 9 in T1
   -> T1 has 4 rows, counting the header as row 1
+
+AMBIGUOUS: 2 blocks are labeled .P1
+     N1-S1.P1 Alpha alpha.
+     N1-S1.S1.P1 Bravo bravo.
+  -> use N1-S1.P1 or N1-S1.S1.P1
 
 AMBIGUOUS: 3 matches for (/\$/) in T1
      | Free | $0 | 1 |

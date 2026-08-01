@@ -335,6 +335,67 @@ def test_an_ambiguous_listing_is_capped() -> None:
         resolve(parse_ref("N1-S1.T1.(/row/)"), msg)
 
 
+# --- fragments -----------------------------------------------------------
+
+# A block label is a fragment by design and must "resolve as written"
+# (REFERENCE_POINTS.md). Nesting makes the same fragment print twice, and the
+# spec already names that case: AMBIGUOUS. Silently picking the shallower one is
+# the mis-resolution this engine exists to prevent.
+NESTED_MD = """\
+# One
+
+Alpha alpha.
+
+## Two
+
+Bravo bravo.
+"""
+
+
+def test_a_fragment_printed_twice_is_ambiguous() -> None:
+    msg = decompose(NESTED_MD, turn=1)
+    with pytest.raises(ResolveError, match=r"AMBIGUOUS: 2 blocks are labeled \.P1"):
+        resolve(parse_ref(".P1", turn=1), msg)
+
+
+def test_an_ambiguous_fragment_shows_both_candidates_and_their_addresses() -> None:
+    # Choosing is impossible without seeing them, and the hint has to be typeable.
+    msg = decompose(NESTED_MD, turn=1)
+    with pytest.raises(ResolveError) as caught:
+        resolve(parse_ref(".P1", turn=1), msg)
+    message = str(caught.value)
+    assert "Alpha alpha." in message
+    assert "Bravo bravo." in message
+    assert "N1-S1.P1" in message
+    assert "N1-S1.S1.P1" in message
+
+
+def test_a_fragment_reaches_a_block_only_the_nesting_holds() -> None:
+    # The other half of "resolve as written": one candidate, however deep.
+    msg = decompose("# One\n\n## Two\n\nBravo bravo.\n", turn=1)
+    assert resolve(parse_ref(".P1", turn=1), msg).content == "Bravo bravo."
+
+
+def test_an_unnested_fragment_still_resolves(worked_msg: Message) -> None:
+    # One candidate is the common case and must not have become louder.
+    assert resolve(parse_ref(".P2", turn=27), worked_msg).content == (
+        "Enterprise pricing is negotiated separately."
+    )
+
+
+def test_a_qualified_address_is_never_ambiguous() -> None:
+    # A full path names its scope, so nesting cannot make it a search.
+    msg = decompose(NESTED_MD, turn=1)
+    assert resolve(parse_ref("N1-S1.P1"), msg).content == "Alpha alpha."
+    assert resolve(parse_ref("N1-S1.S1.P1"), msg).content == "Bravo bravo."
+
+
+def test_a_fragment_that_matches_nothing_still_misses() -> None:
+    msg = decompose(NESTED_MD, turn=1)
+    with pytest.raises(ResolveError, match=r"MISSING: no T1 here"):
+        resolve(parse_ref(".T1", turn=1), msg)
+
+
 # --- across a whole conversation -----------------------------------------
 
 
