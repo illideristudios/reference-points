@@ -88,3 +88,43 @@ Outstanding:
   regex hit returns the enclosing unit, and the matched span is dropped. The decision says return
   both, always.
 - **Q8 / Q9 — the `serve` overlay.** Not started.
+
+---
+
+## Session 2026-08-01 — what the repo owes a stranger
+
+Not grammar decisions. These settle what ships *around* the engine, asked while bringing
+the repo up to open-source standard ahead of a review.
+
+### Q10 — How wide should the community-health pass go?
+**A: docs and CI both.** `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, a second issue template,
+and a GitHub Actions workflow running the pre-commit gate verbatim. The alternative —
+docs now, CI later — leaves the gate in `CLAUDE.md` enforced by discipline only, which
+proves nothing about a pull request from someone who has never read it.
+```
+gate ∈ CLAUDE.md  ∧  ¬∃f(.github/workflows/*)  ⊢  enforced(gate) = discipline
+```
+
+### Q11 — Does the repo need a `SECURITY.md`?
+**A: no, not yet.** A pure-function parser with one runtime dependency and no network
+surface has no vulnerability class worth a private disclosure channel. Revisit when
+`serve` (Q8) lands — a local web app that reads session JSONL is the first thing here
+with an attack surface at all.
+
+### Q12 — Blank issues are disabled and there was one template. What files as an issue?
+**A: only a bug — which was a defect, not a policy.** `blank_issues_enabled: false` plus
+`bug_report.yml` alone made a grammar proposal literally unfileable. Added
+`grammar_change.yml`, which forces the two questions a new address form always owes:
+what it collides with in the existing alphabet, and what a message containing both
+resolves to.
+
+### Q13 — `AGENTS.md` alongside `CLAUDE.md`?
+**A: a symlink, never a copy.** `AGENTS.md → CLAUDE.md`. Two files stating one set of
+rules drift, and the project's own first principle is that one source of truth is what
+makes a label and its address agree by construction. The same argument applies to
+instructions.
+
+---
+
+**Status.** Q10–Q13 shipped. Deliberately not done in this pass, both outward-facing and
+the user's call: making the repo public, and setting its GitHub description and topics.
