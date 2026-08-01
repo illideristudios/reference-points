@@ -24,9 +24,13 @@ if TYPE_CHECKING:
 
 _SPOKEN = frozenset({"user", "assistant"})
 
-# A user record carrying one of these is the CLI talking, not the user: a slash
-# command echo, or the caveat wrapper around a local command's output.
+# A user record *opening* with one of these is the CLI talking, not the user: a
+# slash command echo, or the caveat wrapper around a local command's output.
 _CLI_ECHO = ("<command-name>", "<local-command-stdout>", "local-command-caveat")
+
+# Not a role: a user record the CLI wrote, kept only so the runs on either side of
+# it stay apart. Never becomes an entry.
+_BOUNDARY = "boundary"
 
 # Injected into a real user message rather than sent by anyone. Stripped from the
 # prompt text; it cannot affect numbering, since prompts are never numbered.
@@ -65,6 +69,17 @@ def _texts(content: object) -> list[str]:
     return out
 
 
+def _is_cli_echo(text: str) -> bool:
+    """The CLI talking rather than the user.
+
+    Anchored to the start on purpose: a marker can appear anywhere in a genuine
+    question — naming one is how you ask about this program at all — and matching
+    it there discards a real prompt.
+    """
+    head = text.lstrip()
+    return any(head.startswith(marker) for marker in _CLI_ECHO)
+
+
 def _visible(jsonl: str) -> list[tuple[str, str]]:
     """``(role, text)`` for every message a reader actually sees, in order."""
     seen: list[tuple[str, str]] = []
@@ -80,7 +95,8 @@ def _visible(jsonl: str) -> list[tuple[str, str]]:
             continue
         text = "\n\n".join(part for part in _texts(fields.get("content")) if part.strip())
         if role == "user":
-            if any(marker in text for marker in _CLI_ECHO):
+            if _is_cli_echo(text):
+                seen.append((_BOUNDARY, ""))
                 continue
             text = _REMINDER_RE.sub("", text)
         if text.strip():
@@ -89,14 +105,21 @@ def _visible(jsonl: str) -> list[tuple[str, str]]:
 
 
 def _runs(messages: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Join each run of consecutive same-role messages into one."""
+    """Join each run of consecutive same-role messages into one.
+
+    A boundary closes the open run without becoming one. Two replies that a
+    discarded CLI record sat between are still two replies; joining them would
+    renumber every turn after this point.
+    """
     runs: list[tuple[str, list[str]]] = []
     for role, text in messages:
-        if runs and runs[-1][0] == role:
+        if role == _BOUNDARY:
+            runs.append((_BOUNDARY, []))
+        elif runs and runs[-1][0] == role:
             runs[-1][1].append(text)
         else:
             runs.append((role, [text]))
-    return [(role, "\n\n".join(parts)) for role, parts in runs]
+    return [(role, "\n\n".join(parts)) for role, parts in runs if role != _BOUNDARY]
 
 
 def parse(jsonl: str) -> Transcript:

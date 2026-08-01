@@ -139,6 +139,37 @@ def test_a_slash_command_echo_is_the_cli_not_the_user() -> None:
     assert [p.text for p in prompts] == ["the actual question."]
 
 
+def test_a_prompt_that_only_mentions_a_cli_marker_is_still_the_user() -> None:
+    # Discussing this program means naming its markers. Matching one anywhere in
+    # the text discards a real question — and discarding a prompt is not cosmetic,
+    # it fuses the replies on either side of it.
+    jsonl = "\n".join([
+        _assistant("reply one."),
+        _user("what does <command-name> mean?"),
+        _assistant("reply two."),
+    ])
+    parsed = claude_code.parse(jsonl)
+    prompts = [e for e in parsed.entries if isinstance(e, Prompt)]
+    assert [p.text for p in prompts] == ["what does <command-name> mean?"]
+    assert [t.message.turn for t in parsed.turns] == [1, 2]
+
+
+def test_a_discarded_echo_never_fuses_the_replies_around_it() -> None:
+    # The echo is correctly dropped, but the two replies it sat between are still
+    # two replies. Joining them renumbers every turn after this point, so an
+    # address that used to be right silently becomes wrong.
+    jsonl = "\n".join([
+        _assistant("reply one."),
+        _user("<command-name>/clear</command-name>"),
+        _assistant("reply two."),
+        _user("third question."),
+        _assistant("reply three."),
+    ])
+    parsed = claude_code.parse(jsonl)
+    assert [t.message.turn for t in parsed.turns] == [1, 2, 3]
+    assert [t.message.source for t in parsed.turns] == ["reply one.", "reply two.", "reply three."]
+
+
 def test_an_injected_system_reminder_is_stripped_from_a_prompt() -> None:
     jsonl = "\n".join([
         _user("real words.\n<system-reminder>injected</system-reminder>"),
