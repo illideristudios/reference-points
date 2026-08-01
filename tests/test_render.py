@@ -111,6 +111,15 @@ def test_implicit_section_marker_is_not_a_heading() -> None:
     assert render_inline(msg).splitlines()[0] == "N9-S1"
 
 
+def test_the_implicit_marker_does_not_swallow_the_first_paragraph() -> None:
+    # Having no heading line to sit on, the marker takes its own — and without a
+    # blank line after it the block below is a lazy continuation of it. The two
+    # render as one paragraph reading "N9-S1 .P1 Just a paragraph.", which is the
+    # marker changing what the message renders to.
+    out = render_inline(decompose("Just a paragraph.\n", turn=9))
+    assert [t.type for t in _MD_BLOCKS.parse(out)].count("paragraph_open") == 2
+
+
 def test_glyph_style_renders_the_alternate_marker_set(worked_msg: Message) -> None:
     out = render_inline(worked_msg, style=GLYPH)
     assert out.splitlines()[0] == "## ◆27 §1 Costs"

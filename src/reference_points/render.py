@@ -140,7 +140,9 @@ def _label_section(section: Section, turn: int, style: LabelStyle, plan: _LabelP
     else:  # implicit S1 — no heading line, anchor the marker above the first block
         anchor = _anchor_line(section)
         if anchor >= 0:  # nothing to anchor to: emit no marker rather than line 0
-            plan.before[anchor].insert(0, _section_header(section, turn, style))
+            # The blank line is the same rule label_above follows: without it the
+            # block below is a lazy continuation of the marker's own paragraph.
+            plan.before[anchor][0:0] = [_section_header(section, turn, style), ""]
     for entity in section.entities:
         _label_entity(entity, style, plan)
 
