@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from itertools import zip_longest
 from typing import Any
 
 from markdown_it import MarkdownIt
 
 from reference_points.decompose import Entity, Message, Quote, Section, decompose
-from reference_points.grammar import parse_ref
+from reference_points.grammar import AMBIGUOUS, parse_ref
 from reference_points.render import (
     GLYPH,
     quote_prompt,
@@ -17,7 +18,7 @@ from reference_points.render import (
     render_transcript,
     render_transcript_map,
 )
-from reference_points.resolve import resolve, resolve_entity, resolve_in
+from reference_points.resolve import ResolveError, resolve, resolve_entity, resolve_in
 from reference_points.transcript import Transcript, Turn
 
 GOLDEN_INLINE = """\
@@ -214,13 +215,25 @@ _MD_BLOCKS = MarkdownIt("commonmark").enable("table")
 
 def _skeleton(markdown: str) -> list[tuple[str, str]]:
     """Structural tokens in order, with the bytes of every verbatim block — the
-    render-and-diff ritual CLAUDE.md mandates, in the parser we already depend on."""
-    tokens = MarkdownIt("commonmark").enable("table").parse(markdown)
-    return [
+    render-and-diff ritual CLAUDE.md mandates, in the parser we already depend on.
+
+    The link reference table is appended because a definition emits **no block
+    token at all**. Labeling one turns it into a lazy continuation and every
+    `[key]` in the copy silently becomes literal text — breakage a token-only
+    skeleton cannot see by construction, whatever the fixture contains.
+    """
+    env: dict[str, Any] = {}
+    tokens = _MD_BLOCKS.parse(markdown, env)
+    skeleton = [
         (t.type, t.content if t.type in {"fence", "code_block", "html_block"} else t.tag)
         for t in tokens
         if t.type in _STRUCTURAL
     ]
+    references: dict[str, dict[str, str]] = env.get("references", {})
+    skeleton.extend(
+        ("reference", f"{key} -> {entry['href']}") for key, entry in sorted(references.items())
+    )
+    return skeleton
 
 
 def test_labeling_preserves_the_block_skeleton(torture_md: str, torture_msg: Message) -> None:
@@ -241,11 +254,73 @@ def _addresses(entities: tuple[Entity, ...], prefix: str) -> list[tuple[str, Ent
     return out
 
 
+_PRINTED_LABEL_RE = re.compile(r"^(?:#{1,6} )?(?P<label>N\d+-S\d+|\.[A-Z]\d+)(?: (?P<rest>.*))?$")
+
+
+def _printed_labels(rendered: str) -> list[tuple[str, str]]:
+    """Every label in a labeled copy, with the rest of the line it sits on.
+
+    Read out of ``render_inline``'s *output* on purpose. A helper that rebuilt the
+    address from the tree — as ``_addresses`` below does — agrees with the resolver
+    by construction and so proves nothing about what a reader actually sees.
+    """
+    found: list[tuple[str, str]] = []
+    fenced = False
+    for line in rendered.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        match = _PRINTED_LABEL_RE.match(line)
+        if match:
+            found.append((match["label"], (match["rest"] or "").strip()))
+    return found
+
+
+def test_every_label_render_inline_prints_resolves_or_refuses(torture_msg: Message) -> None:
+    # THE invariant, tested as stated: an address copied off the labeled copy comes
+    # back with the block it was sitting next to — or refuses as AMBIGUOUS, naming
+    # the candidates. Quietly returning a *different* block is the one outcome the
+    # engine exists to rule out. The tree-walk test below cannot see a violation:
+    # it never reads a printed label.
+    labels = _printed_labels(render_inline(torture_msg))
+    assert len(labels) > 20, f"only {len(labels)} labels found — the scan is broken"
+
+    printed = [label for label, _ in labels]
+    resolved_count = refused_count = 0
+    for label, rest in labels:
+        if not label.startswith(".P"):
+            continue  # only a paragraph carries its own text on the label's line
+        alone = printed.count(label) == 1
+        try:
+            got = resolve(parse_ref(label, turn=torture_msg.turn), torture_msg)
+        except ResolveError as refusal:
+            assert alone is False, f"{label} is printed once but will not resolve: {refusal}"
+            assert str(refusal).startswith(AMBIGUOUS), f"{label} refused as {refusal}"
+            refused_count += 1
+            continue
+        assert alone, f"{label} is printed {printed.count(label)} times yet resolved silently"
+        assert got.content.startswith(rest), (
+            f"{label} is printed on {rest!r} but resolves to {got.content[:60]!r}"
+        )
+        resolved_count += 1
+    assert resolved_count and refused_count, (
+        "the fixture must exercise both halves — "
+        f"{resolved_count} resolved, {refused_count} refused"
+    )
+
+
 def test_every_address_in_the_torture_document_resolves_to_its_own_entity(
     torture_msg: Message,
 ) -> None:
-    # Stronger than "must not raise": an off-by-one inside a blockquote resolves
-    # to the wrong block without raising. Only comparing content catches it.
+    # The resolver walks the same tree the decomposer built: a canonical address
+    # for every entity at every depth comes back with that entity. Stronger than
+    # "must not raise" — an off-by-one inside a blockquote resolves to the wrong
+    # block without raising, and only comparing content catches it.
+    #
+    # It does NOT prove the round-trip invariant: these addresses are built from
+    # the tree, not read off the labels. The test above is the one that does.
     checked = 0
     for section in torture_msg.sections:
         for address, entity in _addresses(section.entities, f"N1-S{section.index}"):
