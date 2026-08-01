@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from reference_points.decompose import Message, decompose
 from reference_points.grammar import RefError, parse_ref
-from reference_points.resolve import ResolveError, resolve
+
+if TYPE_CHECKING:
+    from reference_points.transcript import Transcript
+
+from reference_points.resolve import ResolveError, resolve, resolve_in
 
 
 def test_resolves_a_paragraph_sentence(worked_msg: Message) -> None:
@@ -327,3 +333,28 @@ def test_an_ambiguous_listing_is_capped() -> None:
     msg = decompose(f"| a | b |\n|---|---|\n{rows}\n")
     with pytest.raises(ResolveError, match=r"… and 12 more"):
         resolve(parse_ref("N1-S1.T1.(/row/)"), msg)
+
+
+# --- across a whole conversation -----------------------------------------
+
+
+def test_an_address_finds_its_own_turn(transcript: Transcript) -> None:
+    # The point of the whole mode: N does the lookup, nobody hands over a message.
+    assert resolve_in(parse_ref("N3-S1.P1.2"), transcript).content == "It has two sentences."
+
+
+def test_the_same_address_shape_reaches_a_different_turn(transcript: Transcript) -> None:
+    assert resolve_in(parse_ref("N2-S1.T1.2,1"), transcript).content == "Free"
+
+
+def test_a_turn_past_the_end_names_the_range(transcript: Transcript) -> None:
+    with pytest.raises(ResolveError, match=r"no turn N9 in this transcript"):
+        resolve_in(parse_ref("N9-S1.P1"), transcript)
+    with pytest.raises(ResolveError, match=r"this transcript has N1\u2013N3"):
+        resolve_in(parse_ref("N9-S1.P1"), transcript)
+
+
+def test_no_address_reaches_a_prompt(transcript: Transcript) -> None:
+    # Prompts sit between turns 1 and 2 but are numbered by neither.
+    assert "First question" not in resolve_in(parse_ref("N1"), transcript).content
+    assert [t.message.turn for t in transcript.turns] == [1, 2, 3]

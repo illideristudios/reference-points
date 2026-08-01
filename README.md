@@ -39,8 +39,19 @@ uv run python -m reference_points parse 'N1-S1.P2.4'
 uv run python -m reference_points decompose message.md
 ```
 
-Any `<file>` may be `-` to read from stdin. **`--turn N` (default 1) is the turn
-the message came from**, and it does two jobs: it makes a turn-less address legal,
+Point it at a **whole conversation** with `--transcript`, and the address finds
+its own turn — no `--turn`, nothing else to know:
+
+```bash
+# the viewer: every reply labeled, with the prompts it answered quoted between
+uv run python -m reference_points label session.jsonl --transcript
+
+# resolve straight out of it — N does the lookup
+uv run python -m reference_points resolve 'N27-S1.P1' session.jsonl --transcript
+```
+
+Any `<file>` may be `-` to read from stdin. Without `--transcript`, **`--turn N`
+(default 1) is the turn the message came from**, and it does two jobs: it makes a turn-less address legal,
 so the fragments `label` prints resolve exactly as printed; and it makes an
 address for a *different* turn a loud miss rather than a confident wrong answer
 against whatever this message happens to hold.
@@ -51,7 +62,7 @@ An address is `<N>-<S>.<E>.<L>` — **turN · Section · Entity · Location**.
 
 | Part | Meaning | Notes |
 |------|---------|-------|
-| `N<n>` | turn number | **mandatory** in prose; omit it only when the reader already has the turn (see below) |
+| `N<n>` | turn number — the **nth assistant reply** in the conversation | **mandatory** in prose; omit it only when the reader already has the turn (see below) |
 | `S<n>` | section (markdown heading, ATX or setext; whole msg = `S1` if none) | container; nests |
 | `E<n>` | entity, indexed per type within its section | see table below |
 | `L`   | location inside the entity | shape depends on entity type |

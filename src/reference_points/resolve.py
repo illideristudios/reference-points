@@ -35,6 +35,7 @@ from reference_points.grammar import (
 
 if TYPE_CHECKING:
     from reference_points.grammar import EntityStep, Location, MatchLoc, Ref, TableLoc
+    from reference_points.transcript import Transcript
 
 _LETTER_TO_TYPE: dict[str, type[Entity]] = {
     "P": Paragraph,
@@ -351,6 +352,27 @@ def resolve_entity(entity: Entity, location: Location, match: MatchLoc | None) -
     if isinstance(entity, Reference):
         return Resolution("reference", entity.text)
     return _resolve_container(entity, location)
+
+
+def _turn_range(transcript: Transcript) -> str:
+    numbers = [turn.message.turn for turn in transcript.turns]
+    if not numbers:
+        return "this transcript has no replies in it"
+    return f"this transcript has N{min(numbers)}\u2013N{max(numbers)}"
+
+
+def find_turn(transcript: Transcript, number: int) -> Message:
+    """The reply an address names, or a loud miss naming the range that exists."""
+    for turn in transcript.turns:
+        if turn.message.turn == number:
+            return turn.message
+    raise ResolveError(MISSING, f"no turn N{number} in this transcript", _turn_range(transcript))
+
+
+def resolve_in(ref: Ref, transcript: Transcript) -> Resolution:
+    """Resolve against the whole conversation: the address's own turn picks the
+    reply, which is the job ``N`` exists to do."""
+    return resolve(ref, find_turn(transcript, ref.turn))
 
 
 def resolve(ref: Ref, msg: Message) -> Resolution:

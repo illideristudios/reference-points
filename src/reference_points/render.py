@@ -24,6 +24,7 @@ from reference_points.decompose import (
     Section,
     Table,
 )
+from reference_points.transcript import Transcript, Turn
 
 _MAP_EXCERPT = 60
 
@@ -197,3 +198,35 @@ def render_map(msg: Message, style: LabelStyle = ASCII) -> str:
         out.append(_section_header(section, msg.turn, style))
         out.extend(_map_lines(section.entities, "  ", style))
     return "\n".join(out)
+
+
+def quote_prompt(text: str) -> str:
+    """A user message, blockquoted for the viewer.
+
+    Quoting is what makes it unmistakably *not* an address: it renders as someone
+    else speaking, carries no label, and survives whatever the prompt contains —
+    a fence or a quote inside it just nests.
+    """
+    body = "\n".join(f"> {line}".rstrip() for line in text.splitlines())
+    return f"> **you:**\n>\n{body}"
+
+
+def render_transcript(transcript: Transcript, style: LabelStyle = ASCII) -> str:
+    """The whole conversation, every reply labeled and every prompt quoted.
+
+    Both sides, because a reply with no visible question cannot be searched — you
+    cannot find the one you want without seeing what it answered.
+    """
+    blocks: list[str] = []
+    for entry in transcript.entries:
+        if isinstance(entry, Turn):
+            blocks.append(render_inline(entry.message, style))
+        else:
+            blocks.append(quote_prompt(entry.text))
+    return "\n\n".join(blocks)
+
+
+def render_transcript_map(transcript: Transcript, style: LabelStyle = ASCII) -> str:
+    """The address overlay for every reply. Prompts are absent: the map is an index
+    of addresses, and a prompt has none."""
+    return "\n".join(render_map(turn.message, style) for turn in transcript.turns)

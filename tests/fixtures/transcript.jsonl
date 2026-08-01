@@ -1,0 +1,19 @@
+{"type": "file-history-snapshot", "snapshot": {}}
+{"type": "mode", "mode": "default"}
+{"type": "user", "isMeta": true, "message": {"role": "user", "content": [{"type": "text", "text": "Meta bookkeeping, not spoken."}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "<command-name>/clear</command-name>\n<command-message>clear</command-message>"}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "First question. Please answer it."}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "not spoken"}, {"type": "text", "text": "## Answer\n\nThe first half of the reply."}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "tu_1", "name": "Bash", "input": {}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tu_1", "content": "stdout from the tool"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "The second half of the reply."}]}}
+{"type": "user", "isSidechain": true, "message": {"role": "user", "content": [{"type": "text", "text": "Subagent prompt."}]}}
+{"type": "assistant", "isSidechain": true, "message": {"role": "assistant", "content": [{"type": "text", "text": "Subagent reply."}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "Second question."}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "A follow-up.\n<system-reminder>injected, not spoken</system-reminder>"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Here is a table.\n\n| Tier | Price |\n|------|-------|\n| Free | $0 |\n| Pro | $12 |"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "And a fence:\n\n```python\nx = 1\n```"}]}}
+{"type": "ai-title", "aiTitle": "A title"}
+{"type": "attachment", "attachment": {}}
+{"type": "user", "message": {"role": "user", "content": "Third question."}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "The last reply. It has two sentences."}]}}

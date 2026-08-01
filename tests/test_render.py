@@ -9,8 +9,16 @@ from markdown_it import MarkdownIt
 
 from reference_points.decompose import Entity, Message, Quote, Section, decompose
 from reference_points.grammar import parse_ref
-from reference_points.render import GLYPH, render_inline, render_map
-from reference_points.resolve import resolve, resolve_entity
+from reference_points.render import (
+    GLYPH,
+    quote_prompt,
+    render_inline,
+    render_map,
+    render_transcript,
+    render_transcript_map,
+)
+from reference_points.resolve import resolve, resolve_entity, resolve_in
+from reference_points.transcript import Transcript, Turn
 
 GOLDEN_INLINE = """\
 ## N27-S1 Costs
@@ -201,6 +209,9 @@ _STRUCTURAL = frozenset({
 })
 
 
+_MD_BLOCKS = MarkdownIt("commonmark").enable("table")
+
+
 def _skeleton(markdown: str) -> list[tuple[str, str]]:
     """Structural tokens in order, with the bytes of every verbatim block — the
     render-and-diff ritual CLAUDE.md mandates, in the parser we already depend on."""
@@ -242,3 +253,78 @@ def test_every_address_in_the_torture_document_resolves_to_its_own_entity(
             assert resolved.content == resolve_entity(entity, None, None).content, address
             checked += 1
     assert checked > 40, f"the walk covered only {checked} entities"
+
+
+# --- the viewer ----------------------------------------------------------
+
+
+def test_the_viewer_shows_both_sides(transcript: Transcript) -> None:
+    # A reply with no visible question cannot be searched.
+    out = render_transcript(transcript)
+    assert "> **you:**" in out
+    assert "> First question. Please answer it." in out
+    assert ".P1 The first half of the reply." in out
+
+
+def test_the_viewer_labels_every_reply_and_no_prompt(transcript: Transcript) -> None:
+    out = render_transcript(transcript)
+    for turn in transcript.turns:
+        assert render_inline(turn.message) in out
+    quoted = [line for line in out.splitlines() if line.startswith(">")]
+    assert quoted and not any(".P1" in line for line in quoted)
+
+
+def test_a_quoted_prompt_survives_whatever_it_contains() -> None:
+    # A fence or a quote inside a prompt just nests; nothing is corrupted.
+    quoted = quote_prompt("look:\n\n```py\nx = 1\n```\n\n> and a quote")
+    tokens = [t.type for t in _MD_BLOCKS.parse(quoted)]
+    assert tokens[0] == "blockquote_open"
+    assert "fence" in tokens
+    assert "x = 1\n" in [t.content for t in _MD_BLOCKS.parse(quoted)]
+
+
+def test_the_map_indexes_replies_only(transcript: Transcript) -> None:
+    out = render_transcript_map(transcript)
+    assert "N1-S1" in out and "N2-S1" in out and "N3-S1" in out
+    assert "First question" not in out
+
+
+def _unlabeled_view(transcript: Transcript) -> str:
+    """The same assembly the viewer does, with the raw source in place of the
+    labeled render — the baseline a labeled transcript has to match."""
+    blocks: list[str] = []
+    for entry in transcript.entries:
+        blocks.append(entry.message.source if isinstance(entry, Turn) else quote_prompt(entry.text))
+    return "\n\n".join(blocks)
+
+
+def test_the_viewer_still_renders_as_markdown(transcript: Transcript) -> None:
+    # The per-message ritual, lifted to the whole conversation: labeling a
+    # transcript must not change a single block of what it renders to.
+    drift = [
+        (i, a, b)
+        for i, (a, b) in enumerate(
+            zip_longest(
+                _skeleton(_unlabeled_view(transcript)), _skeleton(render_transcript(transcript))
+            )
+        )
+        if a != b
+    ]
+    assert not drift, f"the labeled transcript renders differently: {drift}"
+
+
+def test_every_address_the_viewer_prints_resolves_across_the_conversation(
+    transcript: Transcript,
+) -> None:
+    # The round-trip invariant at conversation scale: an address read off the
+    # viewer resolves with nothing but itself.
+    checked = 0
+    for turn in transcript.turns:
+        for section in turn.message.sections:
+            for address, entity in _addresses(
+                section.entities, f"N{turn.message.turn}-S{section.index}"
+            ):
+                got = resolve_in(parse_ref(address), transcript)
+                assert got.content == resolve_entity(entity, None, None).content, address
+                checked += 1
+    assert checked > 5, f"the walk covered only {checked} entities"

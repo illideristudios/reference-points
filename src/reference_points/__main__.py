@@ -8,7 +8,12 @@ Commands (results → stdout, errors → stderr + non-zero exit):
     map <file>               print the compact address→excerpt overlay
     resolve <ref> <file>     print the content the address points at
 
-Every command takes ``--turn N`` (default 1) — the turn the message came from.
+``--transcript`` / ``-T`` makes ``<file>`` a whole conversation instead of a
+single message. Then the address carries its own turn and ``--turn`` is not
+needed; ``label -T`` with no ``--turn`` is the viewer, printing every reply
+labeled with the prompts it answered quoted between them.
+
+Without ``-T``, ``--turn N`` (default 1) is the turn the message came from.
 Supplying it makes a turn-less address legal, so the fragments ``label`` prints
 (``.P1``) resolve as they are written, and an address for another turn is
 rejected instead of answered. ``<file>`` may be ``-`` to read from stdin.
@@ -21,10 +26,18 @@ import argparse
 import sys
 from pathlib import Path
 
+from reference_points import claude_code
 from reference_points.decompose import Entity, Message, Quote, Section, decompose
 from reference_points.grammar import RefError, parse_ref
-from reference_points.render import ASCII, GLYPH, render_inline, render_map
-from reference_points.resolve import ResolveError, resolve
+from reference_points.render import (
+    ASCII,
+    GLYPH,
+    render_inline,
+    render_map,
+    render_transcript,
+    render_transcript_map,
+)
+from reference_points.resolve import ResolveError, find_turn, resolve, resolve_in
 
 
 def _read(source: str) -> str:
@@ -63,22 +76,30 @@ def _build_parser() -> argparse.ArgumentParser:
             "--turn",
             "-n",
             type=int,
-            default=1,
+            default=None,
             help="the turn this message came from; makes a turn-less address legal",
         )
+
+    def source_flags(p: argparse.ArgumentParser) -> None:
+        p.add_argument("file")
+        p.add_argument(
+            "--transcript",
+            "-T",
+            action="store_true",
+            help="read <file> as a whole conversation, not a single message",
+        )
+        turn_flag(p)
 
     p_parse = sub.add_parser("parse", help="validate an address")
     p_parse.add_argument("ref")
     turn_flag(p_parse)
 
     p_decompose = sub.add_parser("decompose", help="print the entity tree")
-    p_decompose.add_argument("file")
-    turn_flag(p_decompose)
+    source_flags(p_decompose)
 
     for name, help_text in (("label", "inline labels"), ("map", "address→excerpt overlay")):
         p = sub.add_parser(name, help=help_text)
-        p.add_argument("file")
-        turn_flag(p)
+        source_flags(p)
         p.add_argument(
             "--glyphs",
             action="store_true",
@@ -87,26 +108,48 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_resolve = sub.add_parser("resolve", help="resolve an address to content")
     p_resolve.add_argument("ref")
-    p_resolve.add_argument("file")
-    turn_flag(p_resolve)
+    source_flags(p_resolve)
 
     return parser
+
+
+def _message(args: argparse.Namespace) -> Message:
+    """The one message a command operates on. In transcript mode ``--turn`` picks
+    it out of the conversation; otherwise it is the whole file."""
+    text = _read(args.file)
+    if args.transcript:
+        return find_turn(claude_code.parse(text), args.turn)
+    return decompose(text, turn=args.turn if args.turn is not None else 1)
 
 
 def _dispatch(args: argparse.Namespace) -> int:
     if args.cmd == "parse":
         print(parse_ref(args.ref, turn=args.turn))
+        return 0
+
+    whole_transcript = args.transcript and args.turn is None
+    style = GLYPH if getattr(args, "glyphs", False) else ASCII
+
+    if args.cmd == "resolve":
+        ref = parse_ref(args.ref, turn=args.turn)
+        if args.transcript:
+            print(resolve_in(ref, claude_code.parse(_read(args.file))).content)
+        else:
+            print(resolve(ref, _message(args)).content)
+    elif whole_transcript:
+        transcript = claude_code.parse(_read(args.file))
+        if args.cmd == "label":
+            print(render_transcript(transcript, style=style))
+        elif args.cmd == "map":
+            print(render_transcript_map(transcript, style=style))
+        else:
+            print("\n\n".join(_format_tree(t.message) for t in transcript.turns))
     elif args.cmd == "decompose":
-        print(_format_tree(decompose(_read(args.file), turn=args.turn)))
+        print(_format_tree(_message(args)))
     elif args.cmd == "label":
-        style = GLYPH if args.glyphs else ASCII
-        print(render_inline(decompose(_read(args.file), turn=args.turn), style=style))
+        print(render_inline(_message(args), style=style))
     elif args.cmd == "map":
-        style = GLYPH if args.glyphs else ASCII
-        print(render_map(decompose(_read(args.file), turn=args.turn), style=style))
-    elif args.cmd == "resolve":
-        msg = decompose(_read(args.file), turn=args.turn)
-        print(resolve(parse_ref(args.ref, turn=args.turn), msg).content)
+        print(render_map(_message(args), style=style))
     return 0
 
 

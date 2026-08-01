@@ -151,28 +151,56 @@ entity.
    is impossible without seeing them. The CLI prints it unchanged and exits 1 — a
    file it cannot read is `UNREADABLE:`, outside the four, being no address defect.
 
-## Not built: transcript mode
+## Transcript mode
 
-Everything above works on **one message at a time**. `decompose(md, turn=27)` is
-handed the text and told which turn it is, which makes `N` a *check* rather than a
-*lookup*: it catches an address aimed at another turn, but it cannot go and find
-that turn. Reading a whole transcript is the obvious next step, and is
-deliberately not built. Roughly what it needs:
+A `Transcript` is the conversation: replies and the prompts between them, in
+order. Resolving against one is what makes `N` a **lookup** rather than a check —
+the address names its own turn and nothing else has to be known:
 
-- **A transcript reader.** There is no format here, and choosing one is the real
-  decision — the engine has no opinion about how a conversation is stored and
-  should not grow one casually.
-- **Resolution across turns.** `resolve` picking the message by `ref.turn`
-  instead of being handed it. At that point `N` does the job it was designed for
-  and a bare `N27-S1.P1` is complete on its own, with no `--turn` beside it.
-- **A viewer.** Labels are worth nothing you cannot see. A per-message
-  `render_inline` does not give you a labeled conversation to read and point into,
-  and that is where most of the value is.
+```
+$ reference-points resolve 'N27-S1.P1' session.jsonl --transcript
+```
 
-None of this changes the grammar, which is why it is a note and not a design.
-Nothing has been built toward it: `Message.turn` is the only piece already in
-place, and it is there because the wrong-turn check needs it today, not as a hook
-for this.
+**`N<n>` is the nth assistant reply.** A reply is a *run*: every consecutive
+assistant message, joined. One reply that emitted text, called a tool and emitted
+more text is one reply to the reader, so it is one turn — runs of thirteen are
+ordinary in a real session. User messages are shown but never numbered and never
+addressed; addressing them is a possible later mode, and nothing here is shaped
+around it.
+
+Two types, and the asymmetry is in the types rather than in a role string a
+caller has to remember to check:
+
+| entry | is | addressable |
+|-------|-----|-------------|
+| `Turn` | an assistant reply, decomposed; `message.turn` is its `N` | **yes** |
+| `Prompt` | a user message, raw text | no — nothing can point into it, so it is never decomposed |
+
+Turn numbers are **per session file**, and a context compaction does not reset
+them: turn 1 is the first reply in the file, whatever was summarised away.
+
+### Reading a conversation is a separate concern from being one
+
+`transcript.py` holds the container and knows nothing about storage.
+`claude_code.py` is the one reader, and it takes already-read text so it stays
+pure. A second format ships when something needs it, not before.
+
+What a reader discards matters more than what it keeps, because a record that
+slips through does not add noise at the end — **it shifts every turn number after
+it**, and an address that used to be right silently becomes wrong. From a real
+2832-line session: subagent sidechains, six non-message record types,
+`thinking` / `tool_use` / `tool_result` blocks (461 of each), meta records, and
+user records that are the CLI talking rather than the user. 2832 lines → 33
+turns.
+
+### The viewer shows both sides
+
+`label --transcript` prints every reply labeled, with each prompt blockquoted
+between them. Both sides, because a reply with no visible question cannot be
+searched — you cannot find the one you want without seeing what it answered. A
+quoted prompt is unmistakably *not* an address: it carries no label, and whatever
+it contains just nests. `map --transcript` is replies only, being an index of
+addresses, and a prompt has none.
 
 ## Rendering model (why source-parsing is sound)
 
