@@ -145,6 +145,21 @@ def test_glyph_form_with_location() -> None:
     assert parse_ref("◆27 §1 ·T2.3,4") == parse_ref("N27-S1.T2.3,4")
 
 
+def test_a_match_body_is_never_glyph_folded() -> None:
+    # The pattern is the user's, verbatim. Folding · to . widens it to "any
+    # character" and § to -S rewrites it outright — a silently different regex,
+    # matching text the address never asked for.
+    for raw, pattern in (("N1-S1.P1(/a·b/)", "a·b"), ("N1-S1.P1(/§40/)", "§40")):
+        ref = parse_ref(raw)
+        assert ref.match is not None
+        assert ref.match.text == pattern
+
+
+def test_a_glyph_address_still_folds_around_its_match() -> None:
+    # Only the body is off limits; the address in front of it still normalizes.
+    assert parse_ref("◆27 §1 ·T2(/Team/)") == parse_ref("N27-S1.T2(/Team/)")
+
+
 # --- rejections ----------------------------------------------------------
 
 

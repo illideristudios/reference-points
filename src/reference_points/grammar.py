@@ -112,14 +112,22 @@ class Ref:
     raw: str = field(compare=False)
 
 
+def _fold(s: str) -> str:
+    return s.replace("◆", "N").replace("§", "-S").replace("·", ".")
+
+
 def _normalize_glyphs(raw: str) -> str:
     """Fold the glyphs to ASCII and drop separator spaces — but not inside a
-    trailing ``(/…/)``, where they are part of the pattern."""
-    s = raw.replace("◆", "N").replace("§", "-S").replace("·", ".")
-    open_paren = s.find("(")
-    if open_paren != -1 and s.rstrip().endswith(")"):
-        return s[:open_paren].replace(" ", "") + s[open_paren:].rstrip()
-    return s.replace(" ", "")
+    trailing ``(/…/)``, where both are part of the pattern.
+
+    The body is the caller's regex, verbatim. Folding it there is not cosmetic:
+    ``·`` becomes ``.`` and the pattern silently widens to any character, ``§``
+    becomes ``-S`` and it matches something else entirely.
+    """
+    open_paren = raw.find("(")
+    if open_paren != -1 and raw.rstrip().endswith(")"):
+        return _fold(raw[:open_paren]).replace(" ", "") + raw[open_paren:].rstrip()
+    return _fold(raw).replace(" ", "")
 
 
 def _parse_numeric_location(comp: str) -> Location:
