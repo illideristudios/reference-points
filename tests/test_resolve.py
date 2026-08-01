@@ -162,6 +162,12 @@ def test_a_verbatim_block_is_not_addressable_as_prose() -> None:
         resolve(parse_ref("N1-S1.P1"), msg)
 
 
+def test_resolves_a_diagram_line() -> None:
+    msg = decompose("```mermaid\ngraph TD\n  A --> B\n  B --> C\n```\n")
+    assert resolve(parse_ref("N1-S1.D1.3"), msg).content == "  B --> C"
+    assert resolve(parse_ref("N1-S1.D1.(/A --/)"), msg).content == "  A --> B"
+
+
 def test_resolves_a_list_item() -> None:
     msg = decompose("- alpha\n- beta\n- gamma\n")
     assert resolve(parse_ref("N1-S1.L1.3"), msg).content == "gamma"
@@ -257,15 +263,16 @@ def test_a_match_selects_a_subsection_by_its_heading() -> None:
 # --- the failure vocabulary ----------------------------------------------
 
 FAILURES = [
-    ("S1.P1", "REJECTED"),  # no turn
-    ("N1-S1.D1.2", "REJECTED"),  # a diagram takes no location
-    ("N1-S1.P1.T1", "REJECTED"),  # descending into a leaf
-    ("N1-S1.T1.(/[/)", "INVALID"),  # the regex, not the address
-    ("N1-S9.P1", "MISSING"),  # no such section
-    ("N1-S1.T2", "MISSING"),  # no such entity
-    ("N1-S1.T1.9", "MISSING"),  # no such row
-    ("N1-S1.T1.(/nonesuch/)", "MISSING"),  # nothing matched
-    (r"N1-S1.T1.(/\$/)", "AMBIGUOUS"),  # more than one match
+    ("S1.P1", "REJECTED"),  # no turn, and none supplied
+    ("N27-S1.R1.2", "REJECTED"),  # a definition takes no location
+    ("N27-S1.P1.T1", "REJECTED"),  # descending into a leaf
+    ("N27-S1.T1.(/[/)", "INVALID"),  # the regex, not the address
+    ("N9-S1.P1", "MISSING"),  # another turn's address
+    ("N27-S9.P1", "MISSING"),  # no such section
+    ("N27-S1.T2", "MISSING"),  # no such entity
+    ("N27-S1.T1.9", "MISSING"),  # no such row
+    ("N27-S1.T1.(/nonesuch/)", "MISSING"),  # nothing matched
+    (r"N27-S1.T1.(/\$/)", "AMBIGUOUS"),  # more than one match
 ]
 
 

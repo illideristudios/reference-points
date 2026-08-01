@@ -105,6 +105,7 @@ def test_mermaid_fence_is_a_diagram_not_code() -> None:
     entity = decompose(md).sections[0].entities[0]
     assert isinstance(entity, Diagram)
     assert entity.index == 1
+    assert entity.lines == ("graph TD", "A-->B")
 
 
 def test_list_items_are_indexed() -> None:

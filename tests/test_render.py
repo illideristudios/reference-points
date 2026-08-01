@@ -28,12 +28,12 @@ GOLDEN_INLINE = """\
 
 
 def test_render_inline_matches_the_golden_worked_example(worked_msg: Message) -> None:
-    assert render_inline(worked_msg, turn=27) == GOLDEN_INLINE
+    assert render_inline(worked_msg) == GOLDEN_INLINE
 
 
 def test_message_with_no_heading_gets_a_turn_marker() -> None:
-    msg = decompose("First paragraph here.\n\nSecond paragraph here.\n")
-    out = render_inline(msg, turn=3)
+    msg = decompose("First paragraph here.\n\nSecond paragraph here.\n", turn=3)
+    out = render_inline(msg)
     assert out.splitlines()[0] == "N3-S1"
     assert ".P1 First paragraph here." in out
     assert ".P2 Second paragraph here." in out
@@ -41,7 +41,7 @@ def test_message_with_no_heading_gets_a_turn_marker() -> None:
 
 def test_render_map_lists_every_addressable_block(worked_msg: Message) -> None:
     # A standalone index, not a renderable copy: no heading markers.
-    out = render_map(worked_msg, turn=27)
+    out = render_map(worked_msg)
     assert "N27-S1 Costs" in out
     assert "## N27-S1" not in out
     assert ".P1" in out
@@ -51,8 +51,8 @@ def test_render_map_lists_every_addressable_block(worked_msg: Message) -> None:
 
 def test_labeling_preserves_every_heading_level() -> None:
     # Drop the ATX markers and every heading collapses into a paragraph.
-    msg = decompose("# One\n\nalpha.\n\n### Three\n\nbeta.\n\n###### Six\n\ngamma.\n")
-    out = render_inline(msg, turn=9)
+    msg = decompose("# One\n\nalpha.\n\n### Three\n\nbeta.\n\n###### Six\n\ngamma.\n", turn=9)
+    out = render_inline(msg)
     assert "# N9-S1 One" in out
     assert "### .S1 Three" in out
     assert "###### .S1 Six" in out
@@ -66,7 +66,7 @@ def test_position_sensitive_blocks_keep_their_own_label_line() -> None:
         ("alpha.\n\n    indented code\n", "    indented code"),
         ("alpha.\n\n<details>\n<summary>s</summary>\n", "<details>"),
     ):
-        lines = render_inline(decompose(source), turn=1).splitlines()
+        lines = render_inline(decompose(source)).splitlines()
         assert first_line in lines, f"{first_line!r} was mutated: {lines!r}"
         at = lines.index(first_line)
         assert not lines[at - 1], f"no blank line after label: {lines!r}"
@@ -75,49 +75,49 @@ def test_position_sensitive_blocks_keep_their_own_label_line() -> None:
 
 def test_no_label_lands_inside_a_verbatim_block() -> None:
     src = "    indented line one\n    indented line two\n"
-    lines = render_inline(decompose(src), turn=1).splitlines()
+    lines = render_inline(decompose(src)).splitlines()
     at = lines.index("    indented line one")
     assert lines[at + 1] == "    indented line two"
 
-    lines = render_inline(decompose("<details>\n<summary>s</summary>\n"), turn=1).splitlines()
+    lines = render_inline(decompose("<details>\n<summary>s</summary>\n")).splitlines()
     at = lines.index("<details>")
     assert lines[at + 1] == "<summary>s</summary>"
 
 
 def test_a_thematic_break_gets_no_label() -> None:
-    lines = render_inline(decompose("alpha.\n\n---\n\nbeta.\n"), turn=1).splitlines()
+    lines = render_inline(decompose("alpha.\n\n---\n\nbeta.\n")).splitlines()
     at = lines.index("---")
     assert not lines[at - 1], f"the break's surroundings were edited: {lines!r}"
     assert ".P2 beta." in lines
 
 
 def test_ordinary_paragraph_label_stays_inline() -> None:
-    out = render_inline(decompose("alpha one.\n\nbeta two.\n"), turn=1)
+    out = render_inline(decompose("alpha one.\n\nbeta two.\n"))
     assert ".P2 beta two." in out
 
 
 def test_implicit_section_marker_is_not_a_heading() -> None:
     # No heading line to preserve, so no '#' is invented.
-    msg = decompose("Just a paragraph.\n")
-    assert render_inline(msg, turn=9).splitlines()[0] == "N9-S1"
+    msg = decompose("Just a paragraph.\n", turn=9)
+    assert render_inline(msg).splitlines()[0] == "N9-S1"
 
 
 def test_glyph_style_renders_the_alternate_marker_set(worked_msg: Message) -> None:
-    out = render_inline(worked_msg, turn=27, style=GLYPH)
+    out = render_inline(worked_msg, style=GLYPH)
     assert out.splitlines()[0] == "## ◆27 §1 Costs"
     assert "·P1 The pricing tiers changed last quarter." in out
     assert "·T1" in out
 
 
 def test_glyph_style_applies_to_the_map_too(worked_msg: Message) -> None:
-    out = render_map(worked_msg, turn=27, style=GLYPH)
+    out = render_map(worked_msg, style=GLYPH)
     assert "◆27 §1 Costs" in out
     assert "·P1" in out
 
 
 def test_glyph_labels_resolve_back(worked_msg: Message) -> None:
     # The round-trip must hold in whichever style emitted the label.
-    out = render_inline(worked_msg, turn=27, style=GLYPH)
+    out = render_inline(worked_msg, style=GLYPH)
     assert out.splitlines()[0] == "## ◆27 §1 Costs"
     assert resolve(parse_ref("◆27 §1 ·T1.4,2"), worked_msg).content == "$40"
 
@@ -139,13 +139,13 @@ def test_every_emitted_label_resolves_back(worked_msg: Message) -> None:
 
 
 def test_a_setext_heading_keeps_its_underline_and_gains_its_label() -> None:
-    lines = render_inline(decompose("Title\n=====\n\nBody.\n"), turn=4).splitlines()
+    lines = render_inline(decompose("Title\n=====\n\nBody.\n", turn=4)).splitlines()
     assert lines[0] == "N4-S1 Title"
     assert lines[1] == "====="
 
 
 def test_a_nested_setext_heading_is_prefixed_not_rebuilt() -> None:
-    lines = render_inline(decompose("# Top\n\nLower\n-----\n\nBody.\n"), turn=4).splitlines()
+    lines = render_inline(decompose("# Top\n\nLower\n-----\n\nBody.\n", turn=4)).splitlines()
     assert lines[0] == "# N4-S1 Top"
     assert ".S1 Lower" in lines
     assert "-----" in lines
@@ -161,7 +161,7 @@ Body text linking to [mdit].
 
 
 def test_reference_definition_lines_render_byte_identical_to_the_source() -> None:
-    out = render_inline(decompose(REFS_MD), turn=1)
+    out = render_inline(decompose(REFS_MD))
     definition = REFS_MD.splitlines()[2]
     assert definition in out.splitlines()
 
@@ -177,13 +177,13 @@ def test_a_labeled_copy_still_defines_its_links() -> None:
         table: dict[str, dict[str, str]] = env["references"]
         return {key: entry["href"] for key, entry in table.items()}
 
-    assert definitions(render_inline(decompose(REFS_MD), turn=1)) == definitions(REFS_MD)
+    assert definitions(render_inline(decompose(REFS_MD))) == definitions(REFS_MD)
 
 
 def test_render_map_carries_the_addresses_render_inline_does_not() -> None:
     msg = decompose(REFS_MD)
-    assert ".R1" not in render_inline(msg, turn=1)
-    assert ".R1" in render_map(msg, turn=1)
+    assert ".R1" not in render_inline(msg)
+    assert ".R1" in render_map(msg)
 
 
 # --- round-trips over the torture fixture -------------------------------
@@ -214,7 +214,7 @@ def _skeleton(markdown: str) -> list[tuple[str, str]]:
 
 def test_labeling_preserves_the_block_skeleton(torture_md: str, torture_msg: Message) -> None:
     source = _skeleton(torture_md)
-    labeled = _skeleton(render_inline(torture_msg, turn=1))
+    labeled = _skeleton(render_inline(torture_msg))
     drift = [(i, a, b) for i, (a, b) in enumerate(zip_longest(source, labeled)) if a != b]
     assert not drift, f"the labeled copy renders differently: {drift}"
 

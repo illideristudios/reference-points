@@ -130,8 +130,13 @@ Entity = Paragraph | Table | CodeBlock | ListBlock | Diagram | Reference | Quote
 
 @dataclass(frozen=True)
 class Message:
+    """``turn`` is which turn produced this text. It is the address's mandatory
+    first component, so carrying it here is what lets a label be resolved as
+    written and a wrong-turn address be caught instead of answered."""
+
     sections: tuple[Section, ...]
     source: str
+    turn: int
 
 
 def split_sentences(text: str) -> tuple[str, ...]:
@@ -401,9 +406,9 @@ def _parse_container(spans: list[list[Token]], feed: _RefFeed) -> list[Entity]:
     return entities
 
 
-def decompose(markdown: str) -> Message:
+def decompose(markdown: str, turn: int = 1) -> Message:
     """Content before the first heading forms an implicit ``S1``; each top-level
-    heading is a subsequent section."""
+    heading is a subsequent section. ``turn`` is which turn the text came from."""
     env: dict[str, Any] = {}
     tokens = _MD.parse(markdown, env)
     top = _parse_container(_spans(tokens), _RefFeed(_collect_references(env)))
@@ -417,4 +422,4 @@ def decompose(markdown: str) -> Message:
         )
     for hs in heading_sections:
         sections.append(replace(hs, index=len(sections) + 1))
-    return Message(sections=tuple(sections), source=markdown)
+    return Message(sections=tuple(sections), source=markdown, turn=turn)

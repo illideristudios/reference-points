@@ -43,7 +43,7 @@ An address reads **turN · Section · Entity · Location**: `N27-S1.T2.3`.
 
 | Part | Form | Rule |
 |------|------|------|
-| turn | `N<n>` | **mandatory**; an N-less address is REJECTED |
+| turn | `N<n>` | **mandatory** unless the reader supplies it — see below |
 | section | `S<n>` | optional; whole message is `S1` when it has no headings |
 | entity | `<Letter><n>` | indexed **per type within its section**: `T2` = 2nd table |
 | location | see below | legal shape depends on the terminal entity's type |
@@ -51,6 +51,23 @@ An address reads **turN · Section · Entity · Location**: `N27-S1.T2.3`.
 A location attaches only to the **terminal** entity in the path. Container
 entities (`S`, `Q`) nest: `N1-S1.Q1.P1.2` = turn 1, section 1, blockquote 1,
 its paragraph 1, sentence 2.
+
+### The turn is mandatory in prose, not in a call
+
+An address written down has to name its turn, or it means different things in
+different weeks — that is the whole reason `N` exists. But a caller resolving an
+address is *holding the message*, so it already knows which turn that is:
+`parse_ref(raw, turn=…)` accepts a turn-less address and `decompose(md, turn=…)`
+records the answer on the `Message`. Two things follow, and both are load-bearing:
+
+1. **The fragments `render_inline` emits resolve as written.** A block label is a
+   fragment by design (`.P1`, `·T2`) — only a section header carries the full
+   prefix. Without a supplied turn those labels are unresolvable without being
+   re-typed, which breaks the round-trip the whole engine rests on.
+2. **An address for another turn is a miss.** `ref.turn` used to be parsed and
+   discarded, so `N27-S1.P1` resolved happily against turn 5's message and
+   returned turn 5's first paragraph — silent mis-resolution, arriving through
+   the one component that exists to prevent it.
 
 ### Entity alphabet
 
@@ -62,7 +79,7 @@ its paragraph 1, sentence 2.
 | `C` | Verbatim block | `.<line>` | fenced, indented, or raw HTML; `\n`-delimited logical line |
 | `Q` | Quote | *(container)* | blockquote; nests inner entities |
 | `S` | Subsection | *(container)* | markdown heading, ATX or setext; nests |
-| `D` | Diagram | **none** | `D<n>.<anything>` is REJECTED |
+| `D` | Diagram | `.<line>` | a mermaid/dot fence is a fence: same shape as `C` |
 | `R` | Reference | **none** | link reference definition; addressable, never labeled inline |
 
 ### Match strings (address by content instead of index)
@@ -91,8 +108,11 @@ entity.
 ## Resolved open questions
 
 1. **Build the parser?** Yes — this engine.
-2. **Diagram location (`D.L`)?** Undefined. `decompose` emits `D<n>` with no
-   location; `parse_ref` rejects `D<n>.<anything>` loudly.
+2. **Diagram location (`D.L`)?** A **line**, the same as `C`. This reversed an
+   earlier "undefined", taken before `C` existed: a mermaid or dot fence *is* a
+   fenced block whose content is preserved exactly, so the coordinate a reader
+   has is the line. `R` is now the only letter with no location, because a link
+   reference definition renders to nothing there is anything to point into.
 3. **Nesting depth / does the index reset?** Arbitrary nesting; a location
    attaches only to the terminal entity, so "reset per level" is a non-issue.
 4. **Do lists / code / quotes get letters?** Yes: `L`, `C`, `Q` added to the

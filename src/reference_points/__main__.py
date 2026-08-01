@@ -4,12 +4,15 @@ Commands (results → stdout, errors → stderr + non-zero exit):
 
     parse <ref>              validate an address; print its structure
     decompose <file>         print the Section/Entity tree of a message
-    label <file> --turn N    print the message with inline labels
-    map <file> --turn N      print the compact address→excerpt overlay
+    label <file>             print the message with inline labels
+    map <file>               print the compact address→excerpt overlay
     resolve <ref> <file>     print the content the address points at
 
-``<file>`` may be ``-`` to read the message from stdin. ``label`` and ``map``
-take ``--glyphs`` to draw labels with the ``◆ § ·`` marker set instead of ASCII.
+Every command takes ``--turn N`` (default 1) — the turn the message came from.
+Supplying it makes a turn-less address legal, so the fragments ``label`` prints
+(``.P1``) resolve as they are written, and an address for another turn is
+rejected instead of answered. ``<file>`` may be ``-`` to read from stdin.
+``label`` and ``map`` take ``--glyphs`` for the ``◆ § ·`` marker set.
 """
 
 from __future__ import annotations
@@ -46,7 +49,7 @@ def _format_tree(msg: Message) -> str:
     rows: list[str] = []
     for section in msg.sections:
         label = section.heading or "(implicit)"
-        rows.append(f"S{section.index}  {label!r} (line {section.line})")
+        rows.append(f"N{msg.turn}-S{section.index}  {label!r} (line {section.line})")
         rows.extend(_tree_lines(section.entities, "  "))
     return "\n".join(rows)
 
@@ -55,16 +58,27 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="reference-points")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    def turn_flag(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--turn",
+            "-n",
+            type=int,
+            default=1,
+            help="the turn this message came from; makes a turn-less address legal",
+        )
+
     p_parse = sub.add_parser("parse", help="validate an address")
     p_parse.add_argument("ref")
+    turn_flag(p_parse)
 
     p_decompose = sub.add_parser("decompose", help="print the entity tree")
     p_decompose.add_argument("file")
+    turn_flag(p_decompose)
 
     for name, help_text in (("label", "inline labels"), ("map", "address→excerpt overlay")):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("file")
-        p.add_argument("--turn", "-n", type=int, default=1)
+        turn_flag(p)
         p.add_argument(
             "--glyphs",
             action="store_true",
@@ -74,23 +88,25 @@ def _build_parser() -> argparse.ArgumentParser:
     p_resolve = sub.add_parser("resolve", help="resolve an address to content")
     p_resolve.add_argument("ref")
     p_resolve.add_argument("file")
+    turn_flag(p_resolve)
 
     return parser
 
 
 def _dispatch(args: argparse.Namespace) -> int:
     if args.cmd == "parse":
-        print(parse_ref(args.ref))
+        print(parse_ref(args.ref, turn=args.turn))
     elif args.cmd == "decompose":
-        print(_format_tree(decompose(_read(args.file))))
+        print(_format_tree(decompose(_read(args.file), turn=args.turn)))
     elif args.cmd == "label":
         style = GLYPH if args.glyphs else ASCII
-        print(render_inline(decompose(_read(args.file)), turn=args.turn, style=style))
+        print(render_inline(decompose(_read(args.file), turn=args.turn), style=style))
     elif args.cmd == "map":
         style = GLYPH if args.glyphs else ASCII
-        print(render_map(decompose(_read(args.file)), turn=args.turn, style=style))
+        print(render_map(decompose(_read(args.file), turn=args.turn), style=style))
     elif args.cmd == "resolve":
-        print(resolve(parse_ref(args.ref), decompose(_read(args.file))).content)
+        msg = decompose(_read(args.file), turn=args.turn)
+        print(resolve(parse_ref(args.ref, turn=args.turn), msg).content)
     return 0
 
 

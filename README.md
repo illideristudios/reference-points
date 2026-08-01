@@ -21,13 +21,16 @@ wrong guess.
 uv sync                                   # install (Python 3.13, dev tools)
 
 # label a message with its addresses (--turn N, --glyphs)
-uv run python -m reference_points label message.md
+uv run python -m reference_points label message.md --turn 27
 
 # the compact address→excerpt overlay instead
 uv run python -m reference_points map message.md
 
 # resolve an address against a message → prints the referenced content
-uv run python -m reference_points resolve 'N1-S1.T2.3' message.md
+uv run python -m reference_points resolve 'N27-S1.T2.3' message.md --turn 27
+
+# the labels above are fragments; with the turn supplied they resolve as printed
+uv run python -m reference_points resolve '.P1' message.md --turn 27
 
 # validate an address string on its own
 uv run python -m reference_points parse 'N1-S1.P2.4'
@@ -36,7 +39,11 @@ uv run python -m reference_points parse 'N1-S1.P2.4'
 uv run python -m reference_points decompose message.md
 ```
 
-Any `<file>` may be `-` to read from stdin.
+Any `<file>` may be `-` to read from stdin. **`--turn N` (default 1) is the turn
+the message came from**, and it does two jobs: it makes a turn-less address legal,
+so the fragments `label` prints resolve exactly as printed; and it makes an
+address for a *different* turn a loud miss rather than a confident wrong answer
+against whatever this message happens to hold.
 
 ## The grammar
 
@@ -44,7 +51,7 @@ An address is `<N>-<S>.<E>.<L>` — **turN · Section · Entity · Location**.
 
 | Part | Meaning | Notes |
 |------|---------|-------|
-| `N<n>` | turn number | **mandatory** — an N-less address is rejected |
+| `N<n>` | turn number | **mandatory** in prose; omit it only when the reader already has the turn (see below) |
 | `S<n>` | section (markdown heading, ATX or setext; whole msg = `S1` if none) | container; nests |
 | `E<n>` | entity, indexed per type within its section | see table below |
 | `L`   | location inside the entity | shape depends on entity type |
@@ -59,7 +66,7 @@ An address is `<N>-<S>.<E>.<L>` — **turN · Section · Entity · Location**.
 | `C` | Verbatim block — fenced, indented, or raw HTML | line number (`\n`-delimited) | `C1.5` = 5th line |
 | `Q` | Quote (blockquote) | *container* — nests inner entities | `Q1.P1.2` |
 | `S` | Subsection | *container* — nests | `S2.P1` |
-| `D` | Diagram | **none** — `D1.<anything>` is rejected | `D1` |
+| `D` | Diagram (mermaid/dot fence) | line number | `D1.3` = 3rd line |
 | `R` | Link reference definition (`[key]: url`) | **none** — `R1.<anything>` is rejected | `R1`, `R(/mdit/)` |
 
 `R` is the one entity that is **addressable but never labeled inline**: a

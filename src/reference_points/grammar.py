@@ -20,17 +20,18 @@ _ENTITIES: dict[str, tuple[str, str]] = {
     "C": ("verbatim block", "{e}.5 for a line"),
     "Q": ("quote", "{e}.P1 for a paragraph inside it"),
     "S": ("section", "{e}.P1 for a paragraph inside it"),
-    "D": ("diagram", "{e} on its own — a diagram has no addressable parts"),
+    "D": ("diagram", "{e}.3 for a line"),
     "R": ("reference", "{e} on its own — a definition has no addressable parts"),
 }
 
 _ENTITY_LETTERS = frozenset(_ENTITIES)
 _CONTAINER_LETTERS = frozenset("QS")
-_SINGLE_NUMBER_ENTITIES = frozenset("PLC")
-_NO_LOCATION_ENTITIES = frozenset("DR")  # a diagram and a ref def have no sub-units
+_SINGLE_NUMBER_ENTITIES = frozenset("PLCD")
+_NO_LOCATION_ENTITIES = frozenset("R")  # a definition renders to nothing to point into
 
 _TURN_RE = re.compile(r"^N(\d+)")
 _SECTION_RE = re.compile(r"^-S(\d+)")
+_BARE_SECTION_RE = re.compile(r"^-?S\d+")
 # The index is optional — a step may be selected by the trailing match instead.
 _ENTITY_RE = re.compile(r"([A-Za-z])(\d*)$")
 _MATCH_TAIL_RE = re.compile(r"\.?\((g?)/(.*)/\)$")
@@ -177,6 +178,17 @@ def _check_selector_legal(step: EntityStep, location: Location, match: MatchLoc 
         )
 
 
+def _supply_turn(s: str, turn: int) -> str:
+    """Front a turn-less address with the turn of the message it is being read
+    against, so the fragments ``render_inline`` emits — ``.P1``, ``·T2`` — resolve
+    exactly as they are written instead of having to be re-typed in full."""
+    if _BARE_SECTION_RE.match(s):
+        joiner = "" if s.startswith("-") else "-"
+    else:
+        joiner = "" if s.startswith(".") else "."
+    return f"N{turn}{joiner}{s}"
+
+
 def _split_turn_section(s: str) -> tuple[int, int | None, str]:
     """Peel the mandatory ``N<n>`` and optional ``-S<n>`` off the front."""
     turn_match = _TURN_RE.match(s)
@@ -245,13 +257,20 @@ def _parse_path(components: list[str]) -> tuple[tuple[EntityStep, ...], Location
     return tuple(path), location
 
 
-def parse_ref(raw: str) -> Ref:
-    """Or raise :class:`RefError` naming the defect and what to type instead."""
+def parse_ref(raw: str, turn: int | None = None) -> Ref:
+    """Or raise :class:`RefError` naming the defect and what to type instead.
+
+    ``turn`` is the turn of the message this address will be read against. Supply
+    it and a turn-less address is legal, because the caller already knows the
+    answer; omit it and the turn stays mandatory.
+    """
     s = _normalize_glyphs(raw).strip()
     if not s:
         raise RefError("empty address", "an address is at least a turn: N1")
+    if turn is not None and not _TURN_RE.match(s):
+        s = _supply_turn(s, turn)
 
-    turn, section, body = _split_turn_section(s)
+    parsed_turn, section, body = _split_turn_section(s)
     match_location, body = _peel_match_location(body)
     components = [c for c in body.split(".") if c]
     path, location = _parse_path(components)
@@ -266,12 +285,12 @@ def parse_ref(raw: str) -> Ref:
         if location is not None:
             raise RefError(
                 "a location needs an entity to attach to",
-                f"name the entity first, as in N{turn}-S1.P1.{_render(location)}",
+                f"name the entity first, as in N{parsed_turn}-S1.P1.{_render(location)}",
             )
         if match_location is not None:
             raise RefError(
                 "a match needs an entity to attach to",
-                f"name the entity first, as in N{turn}-S1.P1.(/{match_location.text}/)",
+                f"name the entity first, as in N{parsed_turn}-S1.P1.(/{match_location.text}/)",
             )
     elif path[-1].index is None:
         _check_selector_legal(path[-1], location, match_location)
@@ -282,7 +301,12 @@ def parse_ref(raw: str) -> Ref:
             _check_match_legal(path[-1], location)
 
     return Ref(
-        turn=turn, section=section, path=path, location=location, match=match_location, raw=raw
+        turn=parsed_turn,
+        section=section,
+        path=path,
+        location=location,
+        match=match_location,
+        raw=raw,
     )
 
 

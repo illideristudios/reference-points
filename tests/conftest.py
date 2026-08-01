@@ -28,7 +28,7 @@ Enterprise pricing is negotiated separately.
 
 @pytest.fixture
 def worked_msg() -> Message:
-    return decompose(WORKED_MD)
+    return decompose(WORKED_MD, turn=27)
 
 
 @pytest.fixture

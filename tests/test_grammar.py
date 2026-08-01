@@ -148,9 +148,10 @@ def test_glyph_form_with_location() -> None:
 # --- rejections ----------------------------------------------------------
 
 
-def test_diagram_with_location_is_rejected() -> None:
-    with pytest.raises(RefError, match="D1 takes no location"):
-        parse_ref("N1-S1.D1.2")
+def test_reference_definition_with_location_is_rejected() -> None:
+    # R is the only letter with nothing to point into: it renders to nothing.
+    with pytest.raises(RefError, match="R1 takes no location"):
+        parse_ref("N1-S1.R1.2")
 
 
 def test_cell_reference_on_paragraph_is_rejected() -> None:
@@ -218,6 +219,10 @@ def test_a_container_hint_names_a_legal_way_in() -> None:
         parse_ref("N1-S1.Q1.3")
 
 
-def test_a_diagram_hint_says_it_has_no_parts() -> None:
-    with pytest.raises(RefError, match=r"use D1 on its own"):
-        parse_ref("N1-S1.D1.2")
+def test_a_diagram_takes_a_line_like_any_other_fence() -> None:
+    assert parse_ref("N1-S1.D1.3").location == 3
+
+
+def test_a_cell_reference_on_a_diagram_is_rejected() -> None:
+    with pytest.raises(RefError, match=r"D1 takes a single number"):
+        parse_ref("N1-S1.D1.3,2")

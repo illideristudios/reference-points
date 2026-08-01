@@ -1,8 +1,9 @@
 """Resolve a parsed :class:`Ref` against a decomposed :class:`Message`.
 
 Walks to the addressed node and returns its content, or raises
-:class:`ResolveError` naming the miss. The turn number is the caller's concern: it
-selects *which* message to decompose, and everything here is within that one.
+:class:`ResolveError` naming the miss. The turn selects *which* message the
+address is about, so an address for another turn is a miss here rather than a
+confident wrong answer against whatever this message happens to hold.
 """
 
 from __future__ import annotations
@@ -299,10 +300,10 @@ def _resolve_table(table: Table, location: Location, match: MatchLoc | None) -> 
 
 
 def _resolve_indexed(
-    entity: ListBlock | CodeBlock, location: Location, match: MatchLoc | None
+    entity: ListBlock | CodeBlock | Diagram, location: Location, match: MatchLoc | None
 ) -> Resolution:
-    """A list's items and a verbatim block's lines are the same shape: a 1-indexed
-    run of strings, addressed by number or matched against."""
+    """A list's items and a verbatim block's or diagram's lines are the same shape:
+    a 1-indexed run of strings, addressed by number or matched against."""
     items = entity.items if isinstance(entity, ListBlock) else entity.lines
     kind = "item" if isinstance(entity, ListBlock) else "line"
     letter = type(entity).__name__[0]
@@ -345,16 +346,20 @@ def resolve_entity(entity: Entity, location: Location, match: MatchLoc | None) -
         return _resolve_paragraph(entity, location, match)
     if isinstance(entity, Table):
         return _resolve_table(entity, location, match)
-    if isinstance(entity, ListBlock | CodeBlock):
+    if isinstance(entity, ListBlock | CodeBlock | Diagram):
         return _resolve_indexed(entity, location, match)
-    if isinstance(entity, Diagram):
-        return Resolution("diagram", "\n".join(entity.lines))
     if isinstance(entity, Reference):
         return Resolution("reference", entity.text)
     return _resolve_container(entity, location)
 
 
 def resolve(ref: Ref, msg: Message) -> Resolution:
+    if ref.turn != msg.turn:
+        raise ResolveError(
+            MISSING,
+            f"address is for turn {ref.turn}; this message is turn {msg.turn}",
+            f"resolve it against turn {ref.turn}, or re-address it to N{msg.turn}",
+        )
     section = _find_section(msg, ref.section if ref.section is not None else 1)
     targets = _walk(section, ref)
     if ref.path and ref.path[-1].index is None:
