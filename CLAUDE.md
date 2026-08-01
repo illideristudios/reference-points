@@ -5,7 +5,7 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
 
 ## Core Principles (project-specific)
 - **One decomposer, single source of truth.** `decompose()` both labels a message and provides the tree that `resolve()` walks. A label emitted by the renderer and the address the resolver computes are identical *by construction* — never maintain two code paths that could disagree.
-- **Fail loud, never guess.** Every parse/resolve failure raises a typed error naming the specific defect (missing turn, illegal location for entity, ambiguous match, out-of-range). Silent mis-resolution is the one bug this project exists to prevent.
+- **Fail loud, never guess.** Every parse/resolve failure raises a typed error naming the specific defect, prefixed with its category — `REJECTED:` / `INVALID:` / `MISSING:` / `AMBIGUOUS:` (the constants live in `grammar.py`). `RefError` prefixes itself; `ResolveError` takes the category as a required constructor argument, so a new message cannot ship uncategorized. `test_every_failure_names_its_category` holds the line. Silent mis-resolution is the one bug this project exists to prevent.
 - **Pure functions.** `grammar`, `decompose`, `resolve`, `render` are side-effect-free and independently testable; only `__main__` does I/O.
 - **YAGNI.** Build for the grammar as specified. No speculative entity types or config knobs.
 

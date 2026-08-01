@@ -75,13 +75,18 @@ Instead of a numeric location you can address by content:
 - `(/scheme/)` — the **single** match in scope. More than one match → `AMBIGUOUS`.
 - `(g/scheme/)` — **every** match in scope.
 
-A match can also stand in for an entity's **index**: `R(/mdit/)` is the reference
-whose definition matches, `P(/caching/)` the paragraph about caching, and
-`R(g/https/)` every reference that matches. A selector takes no further location.
+A match can also stand in for an entity's **index** — naming *which* entity rather
+than a spot inside one:
 
-An `R` selector runs against the whole definition, so `(/mdit/)` finds it by key
-and `(/github.com/)` by URL, and it follows CommonMark label normalization:
-`[MDIT]`, `[ mdit ]` and `[mdit]` are one reference.
+- `S(/Costs/)` — the subsection headed Costs. A section matches on its heading as
+  well as its body, because the heading is what a reader names it by.
+- `P(/caching/)` — the paragraph about caching.
+- `T(g/\$/)` — every table mentioning a price.
+
+A selector takes no further location. An `R` selector runs against the whole
+definition, so `(/mdit/)` finds it by key and `(/github.com/)` by URL, following
+CommonMark label normalization: `[MDIT]`, `[ mdit ]` and `[mdit]` are one
+reference.
 
 ### How labels are rendered
 
@@ -113,14 +118,20 @@ line after it rather than corrupting the construct.
 
 ## Rejection is loud
 
-A malformed or unresolvable address never guesses. It names the defect (the CLI
-prefixes these with `error: ` and exits non-zero):
+A malformed or unresolvable address never guesses. Every failure names its
+**category** first, so you can sort "I typed it wrong" from "it is not there"
+without reading the prose:
 
-- `missing turn number` — no `N`.
-- `D1 takes no location` — diagram addressed with a location.
-- `AMBIGUOUS: 3 matches for (/scheme/) in T2` — a single-match string hit more than once.
-- `no such row 9 in T2 (has 4)` — location out of range.
-- `no T2 here` — the entity does not exist in that section.
+| Prefix | Means | Example |
+|--------|-------|---------|
+| `REJECTED:` | the address breaks the grammar, or the shape it landed on | `REJECTED: missing turn number` · `REJECTED: D1 takes no location` · `REJECTED: P1 is not a container; cannot address inside it` |
+| `INVALID:` | the address is fine, its regex is not | `INVALID: regex (/[/): unterminated character set at position 0` |
+| `MISSING:` | well-formed, and nothing is there | `MISSING: no T2 here` · `MISSING: no such row 9 in T2 (has 4)` · `MISSING: no match for (/scheme/) in T2` |
+| `AMBIGUOUS:` | well-formed, and more than one thing is there | `AMBIGUOUS: 3 matches for (/scheme/) in T2` |
+
+`parse_ref` raises `RefError` (always `REJECTED`) and `resolve` raises
+`ResolveError` carrying one of the four. The CLI prints the message unchanged and
+exits 1; a file it cannot read is `UNREADABLE:`, which is not an address defect.
 
 ## Development
 

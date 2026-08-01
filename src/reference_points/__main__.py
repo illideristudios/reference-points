@@ -99,8 +99,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         return _dispatch(args)
-    except (RefError, ResolveError, FileNotFoundError, OSError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    except (RefError, ResolveError) as exc:
+        print(exc, file=sys.stderr)  # already carries its category prefix
+        return 1
+    except OSError as exc:
+        print(f"UNREADABLE: {exc}", file=sys.stderr)
         return 1
 
 

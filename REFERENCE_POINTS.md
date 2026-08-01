@@ -72,12 +72,13 @@ its paragraph 1, sentence 2.
 
 E.g. `N27-S1.T2.(/Team/)` = the row in table 2 that uniquely contains "Team".
 
-A match may also stand in for an entity's **index**, selecting *which* entity the
-address names rather than a location within one: `N1-S1.R(/mdit/)` is the same
-reference `R1` names, `N1-S1.P(/caching/)` the paragraph about caching. This is
-the same `(/…/)` syntax, so it falls out for every letter — including `g`:
-`N1-S1.R(g/https/)` is **every** reference that matches, joined, exactly as a
-global location returns every row. A selector takes no further location, having
+A match may also stand in for an entity's **index**, naming *which* entity the
+address means rather than a location within one: `N1-S1.S(/Costs/)` is the
+subsection headed Costs, `N1-S1.P(/caching/)` the paragraph about caching. A
+section matches on its heading as well as its body — the heading is what a reader
+names it by. This is the same `(/…/)` syntax, so it falls out for every letter and
+for `g`: `N1-S1.P(g/pricing/)` is **every** matching paragraph, joined, exactly as
+a global location returns every row. A selector takes no further location, having
 spent itself on the choice.
 
 An `R` selector matches against the definition's whole text — key, destination and
@@ -109,12 +110,15 @@ entity.
    none, and it would stop the line being a definition, turning every `[key]` in
    the labeled copy into literal text. `render_inline` leaves those lines
    byte-identical to the source; `render_map` carries their addresses.
-6. **Rejection UX?** Fail loud, name the defect, wait — never guess. `parse_ref`
-   raises `RefError`, `resolve` raises `ResolveError`, and the CLI prints
-   `error: <message>` on stderr with exit 1. Actual messages:
-   `missing turn number`, `D1 takes no location`,
-   `AMBIGUOUS: 3 matches for (/scheme/) in T2`, `no such row 9 in T2 (has 4)`,
-   `no T2 here`.
+6. **Rejection UX?** Fail loud, name the defect, wait — never guess. Every message
+   opens with its **category**, so a caller sorts the four apart without parsing
+   prose: `REJECTED:` (the address breaks the grammar, or the shape it landed on),
+   `INVALID:` (the address is fine, its regex is not), `MISSING:` (well-formed,
+   nothing there), `AMBIGUOUS:` (well-formed, more than one thing there).
+   `parse_ref` raises `RefError`, which is always `REJECTED`; `resolve` raises
+   `ResolveError` carrying one of the four, required by its constructor so a
+   message cannot ship uncategorized. The CLI prints it unchanged and exits 1 —
+   a file it cannot read is `UNREADABLE:`, which is not an address defect.
 
 ## Rendering model (why source-parsing is sound)
 
@@ -243,8 +247,8 @@ Addresses that resolve against it:
 | `N27-S1.T1.4,2` | `$40` |
 | `N27-S1.T1.(/Team/)` | the Team row (unique match) |
 | `N27-S1.P2.1` | `Enterprise pricing is negotiated separately.` |
-| `N27-S1.D1` | `no D1 here` |
-| `S1.P1` | `missing turn number` |
+| `N27-S1.D1` | `MISSING: no D1 here` |
+| `S1.P1` | `REJECTED: missing turn number` |
 
 Table rows are 1-indexed **including the header row**, so `T1.1` is the header and
 `T1.4` is the third data row. Columns are 1-indexed left to right.

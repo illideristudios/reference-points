@@ -21,7 +21,7 @@ def test_parse_command_prints_ref(capsys: pytest.CaptureFixture[str]) -> None:
 def test_parse_command_rejects_bad_ref(capsys: pytest.CaptureFixture[str]) -> None:
     code = main(["parse", "S1.P1"])
     assert code == 1
-    assert "missing turn number" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip() == "REJECTED: missing turn number"
 
 
 def test_label_command_marks_the_turn(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -53,4 +53,10 @@ def test_resolve_command_reports_a_miss(tmp_path: Path, capsys: pytest.CaptureFi
     md.write_text("Only one sentence.\n")
     code = main(["resolve", "N1-S1.P1.9", str(md)])
     assert code == 1
-    assert "no such sentence 9" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip() == "MISSING: no such sentence 9 in P1 (has 1)"
+
+
+def test_an_unreadable_file_is_its_own_category(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(["resolve", "N1-S1.P1", "/nonexistent/message.md"])
+    assert code == 1
+    assert capsys.readouterr().err.startswith("UNREADABLE: ")

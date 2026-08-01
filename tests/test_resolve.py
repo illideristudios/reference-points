@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from reference_points.decompose import Message, decompose
-from reference_points.grammar import parse_ref
+from reference_points.grammar import RefError, parse_ref
 from reference_points.resolve import ResolveError, resolve
 
 
@@ -71,7 +71,7 @@ def test_inline_flag_enables_case_insensitivity(worked_msg: Message) -> None:
 
 
 def test_invalid_regex_fails_loudly(worked_msg: Message) -> None:
-    with pytest.raises(ResolveError, match="invalid regex"):
+    with pytest.raises(ResolveError, match=r"INVALID: regex"):
         resolve(parse_ref("N27-S1.T1.(/[/)"), worked_msg)
 
 
@@ -246,3 +246,33 @@ def test_a_match_selects_a_paragraph_by_its_content(worked_msg: Message) -> None
     # Not R-specific: any letter may be selected by match.
     result = resolve(parse_ref("N27-S1.P(/Enterprise/)"), worked_msg)
     assert result.content == "Enterprise pricing is negotiated separately."
+
+
+def test_a_match_selects_a_subsection_by_its_heading() -> None:
+    # A reader names a section by its heading, so the selector has to see it.
+    msg = decompose("# Doc\n\nintro.\n\n## Costs\n\nThe tiers changed.\n")
+    assert resolve(parse_ref("N1-S1.S(/Costs/)"), msg).content == "The tiers changed."
+
+
+# --- the failure vocabulary ----------------------------------------------
+
+FAILURES = [
+    ("S1.P1", "REJECTED"),  # no turn
+    ("N1-S1.D1.2", "REJECTED"),  # a diagram takes no location
+    ("N1-S1.P1.T1", "REJECTED"),  # descending into a leaf
+    ("N1-S1.T1.(/[/)", "INVALID"),  # the regex, not the address
+    ("N1-S9.P1", "MISSING"),  # no such section
+    ("N1-S1.T2", "MISSING"),  # no such entity
+    ("N1-S1.T1.9", "MISSING"),  # no such row
+    ("N1-S1.T1.(/nonesuch/)", "MISSING"),  # nothing matched
+    (r"N1-S1.T1.(/\$/)", "AMBIGUOUS"),  # more than one match
+]
+
+
+@pytest.mark.parametrize(("address", "prefix"), FAILURES)
+def test_every_failure_names_its_category(worked_msg: Message, address: str, prefix: str) -> None:
+    # A caller sorts "you typed it wrong" from "it is not there" on the prefix
+    # alone, so every message has to carry one.
+    with pytest.raises((RefError, ResolveError)) as caught:
+        resolve(parse_ref(address), worked_msg)
+    assert str(caught.value).startswith(f"{prefix}: ")

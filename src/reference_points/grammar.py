@@ -24,8 +24,21 @@ _ROW_COL_RE = re.compile(r"(\d+),(\d+)$")
 _COL_ONLY_RE = re.compile(r",(\d+)$")
 
 
+# The failure vocabulary, shared with :mod:`reference_points.resolve`. Every
+# message an address can produce starts with one of these, so a caller can sort
+# "you typed it wrong" from "it is not there" without parsing prose.
+REJECTED = "REJECTED"  # the address violates the grammar, or the shape it found
+INVALID = "INVALID"  # the address is well-formed but its regex is not
+MISSING = "MISSING"  # well-formed, and nothing is there
+AMBIGUOUS = "AMBIGUOUS"  # well-formed, and more than one thing is there
+
+
 class RefError(Exception):
-    """Raised when an address is malformed or violates the grammar."""
+    """A malformed address. Always ``REJECTED`` — a static defect, caught without
+    ever seeing a message."""
+
+    def __str__(self) -> str:
+        return f"{REJECTED}: {super().__str__()}"
 
 
 @dataclass(frozen=True)
