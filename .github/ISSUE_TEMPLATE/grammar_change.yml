@@ -1,0 +1,56 @@
+name: Grammar change or new capability
+description: Propose an address form, an entity type, a rejection, or a CLI capability that does not exist yet.
+labels: ["grammar"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read `REFERENCE_POINTS.md` (the spec) and `QUESTIONS.md` (the decision log) first —
+        the thing you want may already have been decided against, with a reason.
+  - type: textarea
+    id: cannot_say
+    attributes:
+      label: What can't be said today
+      description: The reference you want to make and the address that fails to make it. Be concrete.
+      placeholder: "I want to point at the caption of a figure. There is no entity for it, so the closest address is the enclosing P, which resolves to the wrong text."
+    validations:
+      required: true
+  - type: input
+    id: proposed
+    attributes:
+      label: Proposed address
+      description: The form you are asking for. Leave blank if you have the problem but not the syntax.
+      placeholder: N27-S1.F1.C
+    validations:
+      required: false
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change is this
+      options:
+        - New entity type
+        - New location shape on an existing entity
+        - New match/selector behavior
+        - A form that should be rejected but is accepted
+        - A form that is rejected but should resolve
+        - CLI or rendering capability
+    validations:
+      required: true
+  - type: textarea
+    id: ambiguity
+    attributes:
+      label: What it collides with
+      description: >-
+        Every new form competes with the existing alphabet. Which existing addresses become
+        ambiguous, and what should a message containing both resolve to? If you believe nothing
+        collides, say why.
+    validations:
+      required: true
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Invariants
+      options:
+        - label: A message using this form still renders as valid markdown once labeled.
+        - label: Every address this form emits resolves back to the exact block it labels.
+        - label: Where it cannot resolve, it fails loudly with a category and a hint — it does not guess.

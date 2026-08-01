@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: The grammar specification
+    url: https://github.com/locriani/reference-points/blob/main/REFERENCE_POINTS.md
+    about: What an address means, before you file. The canonical spec.
+  - name: The decision log
+    url: https://github.com/locriani/reference-points/blob/main/QUESTIONS.md
+    about: Why the grammar is the way it is — check whether your question is already settled.
