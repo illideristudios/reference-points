@@ -7,6 +7,7 @@ Commands (results → stdout, errors → stderr + non-zero exit):
     label <file>             print the message with inline labels
     map <file>               print the compact address→excerpt overlay
     resolve <ref> <file>     print the content the address points at
+    turns <file>             count the replies a transcript holds
 
 ``--transcript`` / ``-T`` makes ``<file>`` a whole conversation instead of a
 single message. Then the address carries its own turn and ``--turn`` is not
@@ -110,6 +111,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_resolve.add_argument("ref")
     source_flags(p_resolve)
 
+    # No -T: counting replies is only a question about a conversation, and a
+    # count is what a caller needs to write the *next* turn's labels.
+    p_turns = sub.add_parser("turns", help="count the replies a transcript holds")
+    p_turns.add_argument("file")
+
     return parser
 
 
@@ -125,6 +131,9 @@ def _message(args: argparse.Namespace) -> Message:
 def _dispatch(args: argparse.Namespace) -> int:
     if args.cmd == "parse":
         print(parse_ref(args.ref, turn=args.turn))
+        return 0
+    if args.cmd == "turns":
+        print(len(claude_code.parse(_read(args.file)).turns))
         return 0
 
     whole_transcript = args.transcript and args.turn is None
