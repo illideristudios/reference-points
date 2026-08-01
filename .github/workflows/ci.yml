@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    # The four commands CONTRIBUTING.md tells you to run before committing, in the
+    # same order. Each step runs even if an earlier one failed, so one PR run
+    # reports every defect instead of only the first.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check --output-format=github .
+
+      - name: Format
+        if: ${{ !cancelled() }}
+        run: uv run ruff format --check .
+
+      - name: Type-check
+        if: ${{ !cancelled() }}
+        run: uv run pyright
+
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: uv run pytest -n auto
