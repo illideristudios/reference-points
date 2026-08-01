@@ -144,6 +144,18 @@ def test_every_emitted_label_resolves_back(worked_msg: Message) -> None:
             resolve(parse_ref(address), worked_msg)  # must not raise
 
 
+def test_a_line_break_is_only_what_the_decomposer_calls_one() -> None:
+    # str.splitlines() also breaks on \x0c, \x85, U+2028 and five more that
+    # CommonMark does not — and decompose splits on "\n" alone. Two splitters over
+    # one source is two line maps: every label after such a character lands a line
+    # early, onto a blank line or onto the wrong paragraph, silently.
+    for char in ("\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029", "\x0b"):
+        src = f"Alpha{char}beta gamma.\n\nSecond paragraph.\n\nThird paragraph."
+        lines = render_inline(decompose(src, turn=1)).split("\n")
+        assert ".P2 Second paragraph." in lines, f"{char!r} shifted the labels: {lines!r}"
+        assert ".P3 Third paragraph." in lines, f"{char!r} shifted the labels: {lines!r}"
+
+
 # --- setext headings -----------------------------------------------------
 
 

@@ -145,9 +145,25 @@ def _label_section(section: Section, turn: int, style: LabelStyle, plan: _LabelP
         _label_entity(entity, style, plan)
 
 
+def _source_lines(source: str) -> list[str]:
+    """The decomposer's line map, exactly.
+
+    ``split("\\n")`` and not ``splitlines()``: the latter also breaks on ``\\x0c``,
+    ``\\x85``, ``\\u2028`` and five more that CommonMark does not, while ``decompose``
+    splits on newlines alone. Two splitters over one source is two line maps, and
+    every label after such a character lands a line early. The trailing pop keeps
+    the one thing ``splitlines()`` had right: a final newline ends the last line
+    rather than starting an empty one.
+    """
+    lines = source.split("\n")
+    if lines and not lines[-1]:
+        lines.pop()
+    return lines
+
+
 def render_inline(msg: Message, style: LabelStyle = ASCII) -> str:
     """The source with labels injected, formatting preserved."""
-    plan = _LabelPlan(msg.source.splitlines())
+    plan = _LabelPlan(_source_lines(msg.source))
     for section in msg.sections:
         _label_section(section, msg.turn, style, plan)
 
