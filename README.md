@@ -192,6 +192,11 @@ uv run ruff format .     # format
 uv run pyright           # typecheck (strict on src)
 ```
 
+CI runs those same four commands on every push and pull request.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest: the TDD rule, the two invariants
+that hold the engine together, and what a grammar change has to carry.
+Participation is governed by [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+
 Layout: `src/reference_points/` (`grammar` · `decompose` · `resolve` · `render`
 · `__main__`), one test module per source module under `tests/`. Built with the
 `uv` toolchain; `uv.lock` is committed. Block structure comes from
