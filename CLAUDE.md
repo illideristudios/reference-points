@@ -11,7 +11,7 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
 
 ## Stack
 - **Language**: Python 3.13 (`from __future__ import annotations` on every module)
-- **Runtime dependency**: `markdown-it-py` (MIT, plus `mdurl`) — the CommonMark parser `decompose` maps onto the entity alphabet. One module-level `_MD` constant, no knob, no fallback decomposer.
+- **Runtime dependencies**: `markdown-it-py` (MIT, plus `mdurl`) — the CommonMark parser `decompose` maps onto the entity alphabet. One module-level `_MD` constant, no knob, no fallback decomposer: that is the one-*decomposer* rule, not a dependency budget.
 - **Package manager**: `uv` (uv.lock committed)
 - **Test framework**: `pytest` (+ `pytest-xdist`)
 - **Lint / format**: `ruff` (strict select-list)
