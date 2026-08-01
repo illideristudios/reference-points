@@ -1,0 +1,20 @@
+{
+  "name": "reference-points",
+  "description": "Address the exact block of an earlier reply — a table row, a sentence — with N27-S1.T2.3, and have it resolve mechanically or fail with a named category and the address to type instead. Ships the reference-points skill and puts the CLI on PATH.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Zach Gardner",
+    "email": "locriani@gmail.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/locriani/reference-points",
+  "repository": "git@github.com:locriani/reference-points.git",
+  "keywords": [
+    "citation",
+    "grammar",
+    "transcript",
+    "markdown",
+    "addressing",
+    "references"
+  ]
+}

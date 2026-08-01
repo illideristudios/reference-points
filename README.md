@@ -37,6 +37,9 @@ uv run python -m reference_points parse 'N1-S1.P2.4'
 
 # print the Section/Entity tree
 uv run python -m reference_points decompose message.md
+
+# how many replies a transcript holds — the number the next one is labeled with
+uv run python -m reference_points turns session.jsonl
 ```
 
 Point it at a **whole conversation** with `--transcript`, and the address finds
@@ -55,6 +58,34 @@ Any `<file>` may be `-` to read from stdin. Without `--transcript`, **`--turn N`
 so the fragments `label` prints resolve exactly as printed; and it makes an
 address for a *different* turn a loud miss rather than a confident wrong answer
 against whatever this message happens to hold.
+
+## Use it from Claude Code
+
+This repo **is** a Claude Code plugin. There is nothing to install first — the
+plugin puts the CLI on `PATH` and runs it out of the checkout through `uv`, so
+`uv` is the only prerequisite.
+
+```bash
+claude plugin marketplace add locriani/reference-points   # or an absolute path to a clone
+claude plugin install reference-points@reference-points
+```
+
+Restart Claude Code. Two commands are then on `PATH` in every Bash call:
+
+```bash
+S=$(reference-points-session)                     # this conversation's transcript
+reference-points resolve 'N27-S1.T2.3' "$S" -T    # the block turn 27 pointed at
+reference-points turns "$S"                       # replies so far
+```
+
+The bundled [`reference-points` skill](plugin/skills/reference-points/SKILL.md)
+fires when an address appears in a message, and makes the assistant *resolve* it
+rather than remember what a turn said — which is the failure the grammar exists
+to remove, one level up.
+
+It is a skill and not an MCP server on purpose: both commands are stateless text
+in, text out, which the existing Bash tool already covers. A server would add a
+process and a protocol to carry two `argv` arrays.
 
 ## The grammar
 

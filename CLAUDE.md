@@ -43,6 +43,12 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
   `__main__.py` (CLI only).
 - One test module per source module: `tests/test_<module>.py`.
 - Dataclasses for AST nodes; `pathlib` for file I/O.
+- **The Claude Code plugin lives under `plugin/`**, with the marketplace manifest
+  at `.claude-plugin/marketplace.json` in the repo root. `plugin/bin/` is put on
+  `PATH` by installing the plugin, and `plugin/bin/reference-points` runs this
+  checkout through `uv run --frozen --no-dev --project` — so there is no second
+  copy of the engine to keep in sync and no install step beyond the plugin. Ship
+  behaviour in `src/`; `plugin/` holds only the skill and the two launchers.
 
 ## Documentation Checklist (Required with Every Code Change)
 1. **README.md** — repo root (always required; human-facing; grammar table stays in sync with `grammar.py`).
@@ -58,4 +64,6 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
 - **The marker set is a `LabelStyle`, not a hard-coded string.** `ASCII` is the default (`N27-S1` / `.P1`); `GLYPH` (`◆27 §1` / `·P1`) is opt-in via `--glyphs`. Adding a style means adding a constant, not branching in the renderer. `parse_ref` accepts every style's output — `_normalize_glyphs` is what makes that true, so don't delete it.
 
 ## Gitignore Must-Haves
-`.venv/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`, `dist/`, `*.egg-info/`, `_scratch/`.
+`.venv/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`, `dist/`, `*.egg-info/`, `_scratch/`,
+`.claude/` (per-machine session state — **not** `.claude-plugin/`, which is the
+tracked marketplace manifest).

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Print the path of the Claude Code transcript this shell is running inside.
+#
+# Touches: nothing. Reads two environment variables and the filesystem, writes
+# one path to stdout. Does NOT parse the transcript — that is the CLI's job.
+#
+# This is what makes N<n> a lookup instead of a check:
+#   reference-points resolve 'N27-S1.P1' "$(reference-points-session)" -T
+set -euo pipefail
+
+if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+  echo "reference-points-session: no CLAUDE_CODE_SESSION_ID — not inside a Claude Code session" >&2
+  exit 1
+fi
+
+CONFIG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
+# Glob every project slug rather than deriving one from the working directory:
+# the slug rule belongs to Claude Code, and a session outlives any one cwd.
+for candidate in "$CONFIG"/projects/*/"$CLAUDE_CODE_SESSION_ID.jsonl"; do
+  if [[ -f "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    exit 0
+  fi
+done
+
+echo "reference-points-session: no transcript for session $CLAUDE_CODE_SESSION_ID under $CONFIG/projects" >&2
+exit 1

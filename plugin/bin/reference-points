@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Run the reference-points CLI straight out of this repo.
+#
+# Touches: the uv-managed virtualenv for this project, created on first call.
+# Does NOT install anything on PATH, write any config, or read the transcript
+# itself — Claude Code puts this directory on PATH by installing the plugin,
+# which is the whole install.
+#
+# --frozen so the committed uv.lock decides the versions and a call never
+# re-resolves; --no-dev so the CLI does not drag in pytest, ruff and pyright.
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "reference-points: 'uv' is not on PATH — see https://docs.astral.sh/uv/" >&2
+  exit 127
+fi
+
+exec uv run --frozen --no-dev --project "$ROOT" python -m reference_points "$@"

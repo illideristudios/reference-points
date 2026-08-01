@@ -8,3 +8,5 @@ build/
 *.egg-info/
 .DS_Store
 _scratch/
+# Per-machine session state. Not .claude-plugin/, which is the tracked manifest.
+.claude/
