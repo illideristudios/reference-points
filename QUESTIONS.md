@@ -106,8 +106,8 @@ gate ∈ CLAUDE.md  ∧  ¬∃f(.github/workflows/*)  ⊢  enforced(gate) = disc
 ```
 
 ### Q11 — Does the repo need a `SECURITY.md`?
-**A: no, not yet.** A pure-function parser with one runtime dependency and no network
-surface has no vulnerability class worth a private disclosure channel. Revisit when
+**A: no, not yet.** A pure-function parser with no network surface has no
+vulnerability class worth a private disclosure channel. Revisit when
 `serve` (Q8) lands — a local web app that reads session JSONL is the first thing here
 with an attack surface at all.
 

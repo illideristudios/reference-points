@@ -242,9 +242,9 @@ Participation is governed by [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 Layout: `src/reference_points/` (`grammar` · `decompose` · `resolve` · `render`
 · `__main__`), one test module per source module under `tests/`. Built with the
 `uv` toolchain; `uv.lock` is committed. Block structure comes from
-[`markdown-it-py`](https://github.com/executablebooks/markdown-it-py), the one
-runtime dependency — `decompose` maps its token stream onto the entity alphabet
-rather than scanning markdown itself.
+[`markdown-it-py`](https://github.com/executablebooks/markdown-it-py) —
+`decompose` maps its token stream onto the entity alphabet rather than scanning
+markdown itself.
 
 ## License
 
