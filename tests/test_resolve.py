@@ -170,3 +170,79 @@ def test_resolves_a_list_item() -> None:
 def test_resolves_a_sentence_nested_in_a_blockquote() -> None:
     msg = decompose("> The claim stands. It is supported.\n")
     assert resolve(parse_ref("N1-S1.Q1.P1.2"), msg).content == "It is supported."
+
+
+# --- link reference definitions -----------------------------------------
+
+REFS_MD = """\
+Body text with [mdit] and [spec].
+
+[mdit]: https://github.com/executablebooks/markdown-it-py "The parser"
+[spec]: https://spec.commonmark.org
+"""
+
+
+def test_a_reference_resolves_to_its_definition() -> None:
+    msg = decompose(REFS_MD)
+    content = resolve(parse_ref("N1-S1.R1"), msg).content
+    assert content == '[MDIT]: https://github.com/executablebooks/markdown-it-py "The parser"'
+
+
+def test_index_and_key_name_the_same_reference() -> None:
+    msg = decompose(REFS_MD)
+    by_index = resolve(parse_ref("N1-S1.R1"), msg).content
+    by_key = resolve(parse_ref("N1-S1.R(/mdit/)"), msg).content
+    assert by_index == by_key
+
+
+def test_a_reference_selector_matches_the_destination_too() -> None:
+    # One match against the whole definition — no special case for key vs URL.
+    msg = decompose(REFS_MD)
+    assert resolve(parse_ref("N1-S1.R(/commonmark/)"), msg).content.startswith("[SPEC]:")
+
+
+def test_a_reference_selector_is_case_insensitive_like_a_link_label() -> None:
+    msg = decompose(REFS_MD)
+    assert resolve(parse_ref("N1-S1.R(/MdIt/)"), msg).content.startswith("[MDIT]:")
+
+
+def test_a_selector_hitting_two_definitions_fails_loudly() -> None:
+    msg = decompose(REFS_MD)
+    with pytest.raises(ResolveError, match="AMBIGUOUS: 2 matches"):
+        resolve(parse_ref("N1-S1.R(/https/)"), msg)
+
+
+def test_a_global_selector_returns_every_matching_reference() -> None:
+    msg = decompose(REFS_MD)
+    content = resolve(parse_ref("N1-S1.R(g/https/)"), msg).content
+    assert content == (
+        '[MDIT]: https://github.com/executablebooks/markdown-it-py "The parser"\n'
+        "[SPEC]: https://spec.commonmark.org"
+    )
+
+
+def test_a_global_selector_works_for_any_letter(worked_msg: Message) -> None:
+    content = resolve(parse_ref("N27-S1.P(g/pricing/)"), worked_msg).content
+    assert content == (
+        "The pricing tiers changed last quarter. Here is the current breakdown.\n"
+        "Enterprise pricing is negotiated separately."
+    )
+
+
+def test_a_selector_that_hits_nothing_fails_loudly() -> None:
+    msg = decompose(REFS_MD)
+    with pytest.raises(ResolveError, match="no match"):
+        resolve(parse_ref("N1-S1.R(/nonesuch/)"), msg)
+
+
+def test_reference_lookup_is_section_scoped() -> None:
+    msg = decompose("# One\n\n[a]: https://a\n\n# Two\n\n[b]: https://b\n")
+    assert resolve(parse_ref("N1-S2.R(/b/)"), msg).content == "[B]: https://b"
+    with pytest.raises(ResolveError, match="no match"):
+        resolve(parse_ref("N1-S1.R(/b/)"), msg)
+
+
+def test_a_match_selects_a_paragraph_by_its_content(worked_msg: Message) -> None:
+    # The generalization is not R-specific: any letter may be selected by match.
+    result = resolve(parse_ref("N27-S1.P(/Enterprise/)"), worked_msg)
+    assert result.content == "Enterprise pricing is negotiated separately."

@@ -11,13 +11,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-_ENTITY_LETTERS = frozenset("PTLCQSD")
+_ENTITY_LETTERS = frozenset("PTLCQSDR")
 _CONTAINER_LETTERS = frozenset("QS")
 _SINGLE_NUMBER_ENTITIES = frozenset("PLC")
+_NO_LOCATION_ENTITIES = frozenset("DR")  # a diagram and a ref def have no sub-units
 
 _TURN_RE = re.compile(r"^N(\d+)")
 _SECTION_RE = re.compile(r"^-S(\d+)")
-_ENTITY_RE = re.compile(r"([A-Za-z])(\d+)$")
+# The index is optional: an entity step may instead be selected by the trailing
+# match — `R(/mdit/)` names the same reference `R1` names, `P(/caching/)` the
+# paragraph about caching.
+_ENTITY_RE = re.compile(r"([A-Za-z])(\d*)$")
 _MATCH_TAIL_RE = re.compile(r"\.?\((g?)/(.*)/\)$")
 _ROW_COL_RE = re.compile(r"(\d+),(\d+)$")
 _COL_ONLY_RE = re.compile(r",(\d+)$")
@@ -29,10 +33,14 @@ class RefError(Exception):
 
 @dataclass(frozen=True)
 class EntityStep:
-    """One entity in the path, e.g. table 2 → ``EntityStep("T", 2)``."""
+    """One entity in the path, e.g. table 2 → ``EntityStep("T", 2)``.
+
+    ``index`` is ``None`` when the terminal step is selected by the address's
+    match instead — ``R(/mdit/)`` rather than ``R1``.
+    """
 
     letter: str
-    index: int
+    index: int | None
 
 
 @dataclass(frozen=True)
@@ -92,8 +100,8 @@ def _parse_numeric_location(comp: str) -> Location:
 
 def _check_location_legal(step: EntityStep, location: Location) -> None:
     letter = step.letter
-    if letter == "D":
-        raise RefError(f"D{step.index} takes no location")
+    if letter in _NO_LOCATION_ENTITIES:
+        raise RefError(f"{letter}{step.index} takes no location")
     if letter in _CONTAINER_LETTERS:
         raise RefError(
             f"{letter}{step.index} is a container; address an entity inside it, not a bare location"
@@ -104,14 +112,28 @@ def _check_location_legal(step: EntityStep, location: Location) -> None:
 
 def _check_match_legal(step: EntityStep, location: Location) -> None:
     letter = step.letter
-    if letter == "D":
-        raise RefError(f"D{step.index} takes no match")
+    if letter in _NO_LOCATION_ENTITIES:
+        raise RefError(f"{letter}{step.index} takes no match")
     if letter in _CONTAINER_LETTERS:
         raise RefError(
             f"{letter}{step.index} is a container; address an entity inside it, not a bare match"
         )
     if isinstance(location, TableLoc):
         raise RefError("a content match cannot compose with a cell or column reference")
+
+
+def _check_selector_legal(step: EntityStep, location: Location, match: MatchLoc | None) -> None:
+    """Legality of an index-less entity step — one selected by the address's match
+    rather than by number (``R(/mdit/)``, ``P(/caching/)``).
+
+    It needs that match, and it takes no location, having already spent the match
+    on choosing the entity. Both forms are legal and mean what they mean anywhere
+    else: ``(/…/)`` selects the single hit, ``(g/…/)`` every hit.
+    """
+    if match is None:
+        raise RefError(f"entity {step.letter} needs an index")
+    if location is not None:
+        raise RefError(f"{step.letter}(/…/) selects an entity; it takes no location")
 
 
 def _split_turn_section(s: str) -> tuple[int, int | None, str]:
@@ -158,7 +180,8 @@ def _parse_path(components: list[str]) -> tuple[tuple[EntityStep, ...], Location
             letter = entity_match.group(1).upper()
             if letter not in _ENTITY_LETTERS:
                 raise RefError(f"unknown entity {letter!r}")
-            path.append(EntityStep(letter, int(entity_match.group(2))))
+            index = entity_match.group(2)
+            path.append(EntityStep(letter, int(index) if index else None))
         elif i != len(components) - 1:
             raise RefError(f"location {comp!r} must be the final part of the address")
         else:
@@ -176,15 +199,22 @@ def parse_ref(raw: str) -> Ref:
     match_location, body = _peel_match_location(body)
     components = [c for c in body.split(".") if c]
     path, location = _parse_path(components)
+    for step in path[:-1]:  # only the terminal step may be selected by a match
+        if step.index is None:
+            raise RefError(f"entity {step.letter} needs an index")
 
-    if location is not None:
-        if not path:
+    if not path:
+        if location is not None:
             raise RefError("a location needs an entity to attach to")
-        _check_location_legal(path[-1], location)
-    if match_location is not None:
-        if not path:
+        if match_location is not None:
             raise RefError("a match needs an entity to attach to")
-        _check_match_legal(path[-1], location)
+    elif path[-1].index is None:
+        _check_selector_legal(path[-1], location, match_location)
+    else:
+        if location is not None:
+            _check_location_legal(path[-1], location)
+        if match_location is not None:
+            _check_match_legal(path[-1], location)
 
     return Ref(
         turn=turn, section=section, path=path, location=location, match=match_location, raw=raw

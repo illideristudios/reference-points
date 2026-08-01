@@ -20,12 +20,13 @@ from reference_points.decompose import (
     Message,
     Paragraph,
     Quote,
+    Reference,
     Section,
     Table,
 )
 
 if TYPE_CHECKING:
-    from reference_points.grammar import Location, MatchLoc, Ref, TableLoc
+    from reference_points.grammar import EntityStep, Location, MatchLoc, Ref, TableLoc
 
 _LETTER_TO_TYPE: dict[str, type[Entity]] = {
     "P": Paragraph,
@@ -33,6 +34,7 @@ _LETTER_TO_TYPE: dict[str, type[Entity]] = {
     "L": ListBlock,
     "C": CodeBlock,
     "D": Diagram,
+    "R": Reference,
     "Q": Quote,
     "S": Section,
 }
@@ -59,10 +61,14 @@ def _fmt_match(match: MatchLoc) -> str:
     return f"({prefix}{match.text}/)"
 
 
-def _compile(match: MatchLoc) -> re.Pattern[str]:
-    """Compile the match body as a regex, failing loud on a malformed pattern."""
+def _compile(match: MatchLoc, *, ignore_case: bool = False) -> re.Pattern[str]:
+    """Compile the match body as a regex, failing loud on a malformed pattern.
+
+    ``ignore_case`` is for selecting a :class:`Reference`: CommonMark normalizes
+    link labels case-insensitively, so ``(/mdit/)`` must name ``[MDIT]``.
+    """
     try:
-        return re.compile(match.text)
+        return re.compile(match.text, re.IGNORECASE if ignore_case else 0)
     except re.error as err:
         raise ResolveError(f"invalid regex {_fmt_match(match)}: {err}") from err
 
@@ -109,17 +115,52 @@ def _find_entity(entities: tuple[Entity, ...], letter: str, index: int) -> Entit
     raise ResolveError(f"no {letter}{index} here")
 
 
-def _walk(section: Section, ref: Ref) -> Entity:
-    current: Entity = section
+def _entity_text(entity: Entity) -> str:
+    """An entity's whole content — what a selector match is tested against."""
+    return resolve_entity(entity, None, None).content
+
+
+def _select_entities(
+    entities: tuple[Entity, ...], step: EntityStep, match: MatchLoc | None
+) -> list[Entity]:
+    """The entities a step names: the one at ``step.index``, or — when the step
+    carries no index — those of its type whose content matches.
+
+    The two match forms mean here what they mean everywhere else: ``(/…/)`` names
+    the single hit and is ``AMBIGUOUS`` on more, ``(g/…/)`` names every hit.
+    """
+    if step.index is not None:
+        return [_find_entity(entities, step.letter, step.index)]
+    if match is None:  # parse_ref forbids this; keep the walk total, never guess
+        raise ResolveError(f"{step.letter} needs an index or a match")
+    expected = _LETTER_TO_TYPE[step.letter]
+    pattern = _compile(match, ignore_case=expected is Reference)
+    hits = [e for e in entities if isinstance(e, expected) and pattern.search(_entity_text(e))]
+    scope = f"the {step.letter} entities here"
+    if not hits:
+        raise ResolveError(f"no match for {_fmt_match(match)} in {scope}")
+    if len(hits) > 1 and not match.every:
+        raise ResolveError(f"AMBIGUOUS: {len(hits)} matches for {_fmt_match(match)} in {scope}")
+    return hits
+
+
+def _walk(section: Section, ref: Ref) -> list[Entity]:
+    """The addressed entities — one, unless a terminal ``(g/…/)`` selected several.
+
+    Only the terminal step may be selected by a match, so every step that is
+    descended into names exactly one container.
+    """
+    current: list[Entity] = [section]
     entities = section.entities
     for i, step in enumerate(ref.path):
-        current = _find_entity(entities, step.letter, step.index)
+        current = _select_entities(entities, step, ref.match)
         if i < len(ref.path) - 1:
-            if not isinstance(current, Section | Quote):
+            inner = current[0]
+            if not isinstance(inner, Section | Quote):
                 raise ResolveError(
                     f"{step.letter}{step.index} is not a container; cannot address inside it"
                 )
-            entities = current.entities
+            entities = inner.entities
     return current
 
 
@@ -190,7 +231,9 @@ def _resolve_container(entity: Section | Quote, location: Location) -> Resolutio
     return Resolution(kind, "\n".join(parts))
 
 
-def resolve_entity(entity: Entity, location: Location, match: MatchLoc | None) -> Resolution:
+def resolve_entity(  # ruff: ignore[too-many-return-statements]
+    entity: Entity, location: Location, match: MatchLoc | None
+) -> Resolution:
     """Apply ``location`` (structural) and ``match`` (content regex) to an
     already-located ``entity``. They compose: the location narrows the scope, the
     match then filters within it. Either may be absent."""
@@ -204,11 +247,18 @@ def resolve_entity(entity: Entity, location: Location, match: MatchLoc | None) -
         return _resolve_indexed(entity.lines, location, match, "line", f"C{entity.index}")
     if isinstance(entity, Diagram):
         return Resolution("diagram", "\n".join(entity.lines))
+    if isinstance(entity, Reference):
+        return Resolution("reference", entity.text)
     return _resolve_container(entity, location)
 
 
 def resolve(ref: Ref, msg: Message) -> Resolution:
     """Resolve ``ref`` against ``msg`` or raise :class:`ResolveError` naming the miss."""
     section = _find_section(msg, ref.section if ref.section is not None else 1)
-    entity = _walk(section, ref)
-    return resolve_entity(entity, ref.location, ref.match)
+    targets = _walk(section, ref)
+    if ref.path and ref.path[-1].index is None:
+        # The match chose the entities; it does not also narrow inside them. A
+        # global selector joins them, exactly as a global location joins its rows.
+        parts = [resolve_entity(entity, None, None) for entity in targets]
+        return Resolution(parts[0].kind, "\n".join(part.content for part in parts))
+    return resolve_entity(targets[0], ref.location, ref.match)

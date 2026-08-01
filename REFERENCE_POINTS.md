@@ -26,6 +26,13 @@ Because the *same* decomposition backs both labeling and resolution, a label the
 renderer emits and the address the resolver computes are identical **by
 construction** — they cannot drift.
 
+Block structure comes from `markdown-it-py`, a CommonMark parser, configured once
+as `MarkdownIt("commonmark").enable("table").disable("inline")` with no knob and
+no second decomposer to disagree with. `decompose` maps its token stream onto the
+entity alphabet, so setext headings, loose lists, lazy continuation, nesting depth
+and link reference definitions are the parser's problem rather than rediscovered
+one bug at a time. Adding a construct is a row in that mapping.
+
 ## Grammar
 
 ```
@@ -54,8 +61,9 @@ its paragraph 1, sentence 2.
 | `L` | List | `.<item>` | item index |
 | `C` | Verbatim block | `.<line>` | fenced, indented, or raw HTML; `\n`-delimited logical line |
 | `Q` | Quote | *(container)* | blockquote; nests inner entities |
-| `S` | Subsection | *(container)* | markdown heading; nests |
+| `S` | Subsection | *(container)* | markdown heading, ATX or setext; nests |
 | `D` | Diagram | **none** | `D<n>.<anything>` is REJECTED |
+| `R` | Reference | **none** | link reference definition; addressable, never labeled inline |
 
 ### Match strings (address by content instead of index)
 
@@ -63,6 +71,21 @@ its paragraph 1, sentence 2.
 - `(g/text/)` — **every** match in scope.
 
 E.g. `N27-S1.T2.(/Team/)` = the row in table 2 that uniquely contains "Team".
+
+A match may also stand in for an entity's **index**, selecting *which* entity the
+address names rather than a location within one: `N1-S1.R(/mdit/)` is the same
+reference `R1` names, `N1-S1.P(/caching/)` the paragraph about caching. This is
+the same `(/…/)` syntax, so it falls out for every letter — including `g`:
+`N1-S1.R(g/https/)` is **every** reference that matches, joined, exactly as a
+global location returns every row. A selector takes no further location, having
+spent itself on the choice.
+
+An `R` selector matches against the definition's whole text — key, destination and
+title — so `(/mdit/)` finds it by key and `(/github.com/)` by URL, with no special
+case for either. Key matching follows CommonMark label normalization
+(case-insensitive, internal whitespace collapsed), which is what makes `[MDIT]`,
+`[ mdit ]` and `[mdit]` one reference. Lookup is section-scoped, like every other
+entity.
 
 ## Resolved open questions
 
@@ -79,7 +102,13 @@ E.g. `N27-S1.T2.(/Team/)` = the row in table 2 that uniquely contains "Team".
    `<table>` maps onto `T` (parsing TODO).
 5. **Label density?** Every substantive block is addressable. A **thematic break**
    (`---`, `***`, `___`) is the exception: it is a visual rule with no content to
-   address, so it is not an entity and carries no label.
+   address, so it is not an entity and carries no label. A **link reference
+   definition** is the converse exception — addressable as `R<n>` but *never*
+   labeled inline, the only entity of which that is true. The definition renders
+   to nothing, so an inline label would put visible text where the reader saw
+   none, and it would stop the line being a definition, turning every `[key]` in
+   the labeled copy into literal text. `render_inline` leaves those lines
+   byte-identical to the source; `render_map` carries their addresses.
 6. **Rejection UX?** Fail loud, name the defect, wait — never guess. Examples:
    `REJECTED: missing turn number`, `REJECTED: D1 takes no location`,
    `AMBIGUOUS: 3 matches for (/scheme/)`, `no such row 9 in T2`.
@@ -114,9 +143,14 @@ Full paths are for *references*; fragments are for *labels*.
 Labels are added to the source; they must never change what it renders to. Two
 rules follow, and both are load-bearing:
 
-1. **Heading markers are preserved.** A section label rebuilds the line with its
-   original ATX markers — `## N27-S1 Costs`, not `N27-S1 Costs`. Dropping them
-   collapses every heading in the message into a paragraph.
+1. **Heading markers are preserved.** An ATX section label rebuilds the line with
+   its original markers — `## N27-S1 Costs`, not `N27-S1 Costs`. Dropping them
+   collapses every heading in the message into a paragraph. A **setext** heading
+   is labeled by *prefix* instead: the label joins the heading's first line and
+   the `===` / `---` underline is left untouched. Rebuilding would strand the
+   underline, and on a multi-line setext heading it would duplicate the text.
+   This is why `Section` carries `markup` (the literal marker) alongside `level`:
+   `level` is not derivable from it, since a setext **h2** has `markup == '-'`.
 2. **A position-sensitive first line gets its label on its own line, followed by
    a blank line.** A paragraph label is normally an inline prefix, but an
    indented code block, a thematic break (`---`, `***`, `___`), and the start of

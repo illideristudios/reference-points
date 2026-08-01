@@ -8,6 +8,7 @@ from reference_points.decompose import (
     ListBlock,
     Paragraph,
     Quote,
+    Reference,
     Section,
     Table,
     decompose,
@@ -187,6 +188,103 @@ def test_an_indented_bullet_stays_a_list_item() -> None:
     lst = decompose("- top level\n    - doubly nested bullet\n").sections[0].entities[0]
     assert isinstance(lst, ListBlock)
     assert lst.items == ("top level", "doubly nested bullet")
+
+
+# --- setext headings -----------------------------------------------------
+# They used to decompose as paragraphs, so `P1` resolved to "Title =====" and
+# every entity beneath the heading was indexed into the wrong section — silent
+# mis-resolution that rendered correctly.
+
+
+def test_setext_level_one_opens_a_section() -> None:
+    section = decompose("Title\n=====\n\nBody.\n").sections[0]
+    assert section.heading == "Title"
+    assert section.level == 1
+    assert section.markup == "="
+
+
+def test_setext_level_two_opens_a_section_without_promoting_it() -> None:
+    # `len(markup)` would say 1 here, which is why `level` is its own field.
+    section = decompose("Title\n-----\n\nBody.\n").sections[0]
+    assert section.heading == "Title"
+    assert section.level == 2
+    assert section.markup == "-"
+
+
+def test_multi_line_setext_heading_joins_its_text() -> None:
+    section = decompose("Line one\nline two\n========\n\nBody.\n").sections[0]
+    assert section.heading == "Line one line two"
+
+
+def test_setext_and_atx_headings_nest_by_level() -> None:
+    msg = decompose("Top\n===\n\nalpha.\n\n## Sub\n\nbeta.\n")
+    assert len(msg.sections) == 1
+    top = msg.sections[0]
+    assert top.heading == "Top"
+    sub = [e for e in top.entities if isinstance(e, Section)]
+    assert [s.heading for s in sub] == ["Sub"]
+
+
+# --- lists ---------------------------------------------------------------
+
+
+def test_a_loose_list_is_one_list_block() -> None:
+    # A blank line between bullets makes the list loose, not two lists.
+    entities = decompose("- a\n- b\n\n- c\n").sections[0].entities
+    assert [type(e) for e in entities] == [ListBlock]
+    lst = entities[0]
+    assert isinstance(lst, ListBlock)
+    assert lst.items == ("a", "b", "c")
+
+
+def test_a_nested_list_flattens_depth_first() -> None:
+    # Every bullet stays addressable, and `L1.3` is the third bullet a reader counts.
+    lst = decompose("- top\n  - nested\n    - deep\n- another\n").sections[0].entities[0]
+    assert isinstance(lst, ListBlock)
+    assert lst.items == ("top", "nested", "deep", "another")
+
+
+def test_a_list_item_carries_only_its_own_direct_text() -> None:
+    lst = decompose("- parent\n  - child\n").sections[0].entities[0]
+    assert isinstance(lst, ListBlock)
+    assert lst.items == ("parent", "child")  # not ("parent child", "child")
+
+
+# --- link reference definitions ------------------------------------------
+
+
+def test_a_link_reference_definition_is_a_reference_not_a_paragraph() -> None:
+    # As a paragraph it took a `.P1` label, which stopped the line being a
+    # definition at all — every `[ref]` in the labeled copy then rendered as text.
+    entities = decompose('[ref]: https://example.com "Title"\n').sections[0].entities
+    assert [type(e) for e in entities] == [Reference]
+    ref = entities[0]
+    assert isinstance(ref, Reference)
+    assert ref.destination == "https://example.com"
+    assert ref.title == "Title"
+
+
+def test_reference_keys_follow_commonmark_label_normalization() -> None:
+    keys: list[str] = []
+    for source in ("[mdit]: https://x\n", "[MDIT]: https://x\n", "[ mdit ]: https://x\n"):
+        entity = decompose(source).sections[0].entities[0]
+        assert isinstance(entity, Reference)
+        keys.append(entity.key)
+    assert len(set(keys)) == 1, f"three spellings of one label disagreed: {keys}"
+
+
+def test_references_are_indexed_in_source_order_within_their_section() -> None:
+    md = "# One\n\n[a]: https://a\n\n# Two\n\n[b]: https://b\n[c]: https://c\n"
+    msg = decompose(md)
+    first = [e for e in msg.sections[0].entities if isinstance(e, Reference)]
+    second = [e for e in msg.sections[1].entities if isinstance(e, Reference)]
+    assert [(r.index, r.key) for r in first] == [(1, "A")]
+    assert [(r.index, r.key) for r in second] == [(1, "B"), (2, "C")]
+
+
+def test_a_reference_keeps_its_place_among_the_blocks() -> None:
+    entities = decompose("alpha.\n\n[a]: https://a\n\nbeta.\n").sections[0].entities
+    assert [type(e) for e in entities] == [Paragraph, Reference, Paragraph]
 
 
 def test_preamble_before_first_heading_is_implicit_section_one() -> None:

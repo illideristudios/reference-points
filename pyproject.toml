@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "A citation grammar for pointing at exact blocks of a chat message — resolve or fail loudly, never silently mis-resolve."
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "markdown-it-py>=4,<5",
+]
 
 [project.scripts]
 reference-points = "reference_points.__main__:main"

@@ -11,6 +11,7 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
 
 ## Stack
 - **Language**: Python 3.13 (`from __future__ import annotations` on every module)
+- **Runtime dependency**: `markdown-it-py` (MIT, plus `mdurl`) — the CommonMark parser `decompose` maps onto the entity alphabet. One module-level `_MD` constant, no knob, no fallback decomposer.
 - **Package manager**: `uv` (uv.lock committed)
 - **Test framework**: `pytest` (+ `pytest-xdist`)
 - **Lint / format**: `ruff` (strict select-list)
@@ -30,7 +31,7 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
 
 ### Testing — Hard Rules
 - New behavior MUST have a failing test first (watch it fail for the right reason).
-- The **round-trip invariant** is load-bearing: every address `render_inline` emits MUST resolve back to the exact block it labels. Keep a test enforcing it.
+- The **round-trip invariant** is load-bearing: every address `render_inline` emits MUST resolve back to the exact block it labels. `test_every_address_in_the_torture_document_resolves_to_its_own_entity` enforces it at every depth by comparing *content*, not by asserting no-raise — an off-by-one inside a blockquote or a list resolves to the wrong block and still raises nothing.
 - Match parser tests to the grammar table in the README — every valid form and every rejection form has a test.
 
 ## Code Organization
@@ -46,8 +47,9 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
 2. **REFERENCE_POINTS.md** — the canonical spec; update when a grammar decision changes.
 
 ## Project-Specific Gotchas
-- **A labeled message MUST still render as markdown.** This is the constraint that shapes `render_inline`: heading markers are re-emitted, and a label never gets prefixed onto a line whose leading characters carry meaning (indented code, thematic break, HTML block) — it goes above, with a blank line. Verify a change by rendering source and labeled output through a GFM renderer and diffing the block skeletons; don't eyeball it.
-- **A verbatim block stays verbatim.** Fenced, indented, and raw-HTML blocks are all `C` entities: their lines are stored exactly as written and addressed by *line* (or `(/match/)`), never by sentence. The bug this rule exists to prevent is quiet: an unrecognized block type falls through to `_consume_paragraph`, which strips and joins its lines — content destroyed at decompose time, long before anything renders. Adding a block type means teaching `_consume_block` *and* deciding whether it may interrupt a paragraph in `_block_starts_here` (CommonMark: indented code may not; HTML blocks and thematic breaks may).
+- **A labeled message MUST still render as markdown.** This is the constraint that shapes `render_inline`: heading markers are re-emitted, and a label never gets prefixed onto a line whose leading characters carry meaning (indented code, thematic break, HTML block) — it goes above, with a blank line. Verify a change by rendering source and labeled output through a GFM renderer and diffing the block skeletons; don't eyeball it. `test_labeling_preserves_the_block_skeleton` in `tests/test_render.py` is that ritual, run over `tests/fixtures/torture.md` with the parser the decomposer already depends on — extend the fixture rather than checking by hand.
+- **A verbatim block stays verbatim.** Fenced, indented, and raw-HTML blocks are all `C` entities: their lines are stored exactly as written and addressed by *line* (or `(/match/)`), never by sentence. Adding a construct means adding a row to the token→entity mapping in `_leaf_entity`, not a scanner branch — what may interrupt a paragraph is the parser's problem now, not ours. Keep the fallback at the end of that dispatch lossless: an unmapped block becomes a verbatim `C` rather than being dropped.
+- **`R` is addressable but never labeled inline.** It is the only entity of which that is true. A link reference definition renders to nothing, so `_label_entity` returns early for it and `_anchor_line` refuses to anchor the implicit-S1 marker above one — a marker there makes the definition a lazy continuation of the marker's paragraph, and every `[key]` in the labeled copy silently becomes literal text. `render_map` is where its address lives.
 - **`split_sentences` is a heuristic** — imperfection is acceptable *because* the same function runs at label-time and resolve-time, so labels and lookups stay self-consistent. Don't "fix" it toward linguistic correctness at the cost of determinism.
 - **The marker set is a `LabelStyle`, not a hard-coded string.** `ASCII` is the default (`N27-S1` / `.P1`); `GLYPH` (`◆27 §1` / `·P1`) is opt-in via `--glyphs`. Adding a style means adding a constant, not branching in the renderer. `parse_ref` accepts every style's output — `_normalize_glyphs` is what makes that true, so don't delete it.
 

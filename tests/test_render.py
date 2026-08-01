@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from reference_points.decompose import Message, decompose
+from itertools import zip_longest
+from typing import Any
+
+from markdown_it import MarkdownIt
+
+from reference_points.decompose import Entity, Message, Quote, Section, decompose
 from reference_points.grammar import parse_ref
 from reference_points.render import GLYPH, render_inline, render_map
-from reference_points.resolve import resolve
+from reference_points.resolve import resolve, resolve_entity
 
 GOLDEN_INLINE = """\
 ## N27-S1 Costs
@@ -132,3 +137,113 @@ def test_every_emitted_label_resolves_back(worked_msg: Message) -> None:
             letter = type(entity).__name__[0]
             address = f"N27-S{section.index}.{letter}{entity.index}"
             resolve(parse_ref(address), worked_msg)  # must not raise
+
+
+# --- setext headings -----------------------------------------------------
+
+
+def test_a_setext_heading_keeps_its_underline_and_gains_its_label() -> None:
+    lines = render_inline(decompose("Title\n=====\n\nBody.\n"), turn=4).splitlines()
+    assert lines[0] == "N4-S1 Title"
+    assert lines[1] == "====="
+
+
+def test_a_nested_setext_heading_is_prefixed_not_rebuilt() -> None:
+    lines = render_inline(decompose("# Top\n\nLower\n-----\n\nBody.\n"), turn=4).splitlines()
+    assert lines[0] == "# N4-S1 Top"
+    assert ".S1 Lower" in lines
+    assert "-----" in lines
+
+
+# --- link reference definitions -----------------------------------------
+
+REFS_MD = """\
+Body text linking to [mdit].
+
+[mdit]: https://github.com/executablebooks/markdown-it-py "The parser"
+"""
+
+
+def test_reference_definition_lines_render_byte_identical_to_the_source() -> None:
+    out = render_inline(decompose(REFS_MD), turn=1)
+    definition = REFS_MD.splitlines()[2]
+    assert definition in out.splitlines()
+
+
+def test_a_labeled_copy_still_defines_its_links() -> None:
+    # The real invariant behind the byte-identical rule: label the message and the
+    # parser must still collect the definition, or every `[mdit]` renders as text.
+    md = MarkdownIt("commonmark")
+
+    def definitions(markdown: str) -> dict[str, str]:
+        env: dict[str, Any] = {}
+        md.parse(markdown, env)
+        table: dict[str, dict[str, str]] = env["references"]
+        return {key: entry["href"] for key, entry in table.items()}
+
+    assert definitions(render_inline(decompose(REFS_MD), turn=1)) == definitions(REFS_MD)
+
+
+def test_render_map_carries_the_addresses_render_inline_does_not() -> None:
+    msg = decompose(REFS_MD)
+    assert ".R1" not in render_inline(msg, turn=1)
+    assert ".R1" in render_map(msg, turn=1)
+
+
+# --- round-trips over the torture fixture -------------------------------
+
+_STRUCTURAL = frozenset({
+    "fence",
+    "code_block",
+    "html_block",
+    "hr",
+    "table_open",
+    "bullet_list_open",
+    "ordered_list_open",
+    "blockquote_open",
+    "heading_open",
+})
+
+
+def _skeleton(markdown: str) -> list[tuple[str, str]]:
+    """The block skeleton of a document: the structural tokens in order, with the
+    bytes of every verbatim block. This is the render-and-diff ritual CLAUDE.md
+    mandates, run against the parser the decomposer itself depends on."""
+    tokens = MarkdownIt("commonmark").enable("table").parse(markdown)
+    return [
+        (t.type, t.content if t.type in {"fence", "code_block", "html_block"} else t.tag)
+        for t in tokens
+        if t.type in _STRUCTURAL
+    ]
+
+
+def test_labeling_preserves_the_block_skeleton(torture_md: str, torture_msg: Message) -> None:
+    source = _skeleton(torture_md)
+    labeled = _skeleton(render_inline(torture_msg, turn=1))
+    drift = [(i, a, b) for i, (a, b) in enumerate(zip_longest(source, labeled)) if a != b]
+    assert not drift, f"the labeled copy renders differently: {drift}"
+
+
+def _addresses(entities: tuple[Entity, ...], prefix: str) -> list[tuple[str, Entity]]:
+    """Every entity at every depth with its canonical address."""
+    out: list[tuple[str, Entity]] = []
+    for entity in entities:
+        address = f"{prefix}.{type(entity).__name__[0]}{entity.index}"
+        out.append((address, entity))
+        if isinstance(entity, Section | Quote):
+            out.extend(_addresses(entity.entities, address))
+    return out
+
+
+def test_every_address_in_the_torture_document_resolves_to_its_own_entity(
+    torture_msg: Message,
+) -> None:
+    # Stronger than "must not raise": an off-by-one inside a blockquote or a list
+    # resolves to the wrong block, and only comparing content catches that.
+    checked = 0
+    for section in torture_msg.sections:
+        for address, entity in _addresses(section.entities, f"N1-S{section.index}"):
+            resolved = resolve(parse_ref(address), torture_msg)
+            assert resolved.content == resolve_entity(entity, None, None).content, address
+            checked += 1
+    assert checked > 40, f"the walk covered only {checked} entities"

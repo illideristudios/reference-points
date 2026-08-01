@@ -13,11 +13,11 @@ accepts either, so a label always resolves in whichever style emitted it.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 
 from reference_points.decompose import (
-    THEMATIC_BREAK_RE,
     CodeBlock,
     Diagram,
     Entity,
@@ -25,11 +25,16 @@ from reference_points.decompose import (
     Message,
     Paragraph,
     Quote,
+    Reference,
     Section,
     Table,
 )
 
 _MAP_EXCERPT = 60
+
+# Purely a label-safety heuristic now: the decomposer gets thematic breaks as
+# tokens, but a label written onto one would turn it into a setext heading.
+THEMATIC_BREAK_RE = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
 
 
 @dataclass(frozen=True)
@@ -50,8 +55,13 @@ def _entity_letter(entity: Entity) -> str:
     return type(entity).__name__[0]  # Paragraph→P, Table→T, ListBlock→L, ... Section→S
 
 
+def _section_prefix(section: Section, turn: int, style: LabelStyle) -> str:
+    """The section's full address — ``N27-S1``, without its heading text."""
+    return f"{style.turn}{turn}{style.joiner}{style.section}{section.index}"
+
+
 def _section_header(section: Section, turn: int, style: LabelStyle) -> str:
-    head = f"{style.turn}{turn}{style.joiner}{style.section}{section.index}"
+    head = _section_prefix(section, turn, style)
     return f"{head} {section.heading}" if section.heading else head
 
 
@@ -99,19 +109,31 @@ class _LabelPlan:
         return line < len(self.lines) and _is_position_sensitive(self.lines[line])
 
 
-def _heading_line(level: int, label: str, heading: str) -> str:
-    """Rebuild a heading line so the labeled copy still renders as markdown — the
-    ATX markers are kept and the label joins the heading text."""
-    text = f"{label} {heading}" if heading else label
-    return f"{'#' * level} {text}" if level else text
+def _label_heading(section: Section, label: str, plan: _LabelPlan) -> None:
+    """Write ``label`` onto a heading line, keeping the line a heading.
+
+    ATX rebuilds the line from its own markers. Setext prefixes the label onto the
+    heading text and leaves the underline alone — rebuilding would strand the
+    underline, and on a multi-line setext heading it would duplicate the text.
+    """
+    if section.markup.startswith("#"):
+        text = f"{label} {section.heading}" if section.heading else label
+        plan.replace[section.line] = f"{section.markup} {text}"
+    else:
+        plan.prefix[section.line] = label
 
 
 def _label_entity(entity: Entity, style: LabelStyle, plan: _LabelPlan) -> None:
+    if isinstance(entity, Reference):
+        # A link reference definition renders to nothing, so an inline label would
+        # put visible text where the reader saw none — and would stop the line
+        # being a definition at all. Addressable, never labeled: see render_map.
+        return
     tag = f"{style.entity}{_entity_letter(entity)}{entity.index}"
     if isinstance(entity, Paragraph):
         plan.label_paragraph(entity.line, tag)
     elif isinstance(entity, Section):
-        plan.replace[entity.line] = _heading_line(entity.level, tag, entity.heading)
+        _label_heading(entity, tag, plan)
         for child in entity.entities:
             _label_entity(child, style, plan)
     else:
@@ -120,13 +142,23 @@ def _label_entity(entity: Entity, style: LabelStyle, plan: _LabelPlan) -> None:
         plan.label_above(entity.line, tag)
 
 
+def _anchor_line(section: Section) -> int:
+    """The line the implicit S1's marker sits above: the first entity that can
+    carry one. A reference definition cannot — a marker written above it makes the
+    definition a lazy continuation of the marker's paragraph, so it stops being a
+    definition and every link through it renders as literal text.
+    """
+    lines = [e.line for e in section.entities if e.line >= 0 and not isinstance(e, Reference)]
+    return min(lines, default=-1)
+
+
 def _label_section(section: Section, turn: int, style: LabelStyle, plan: _LabelPlan) -> None:
-    header = _section_header(section, turn, style)
     if section.line >= 0:
-        plan.replace[section.line] = _heading_line(section.level, header, "")
+        _label_heading(section, _section_prefix(section, turn, style), plan)
     else:  # implicit S1 — no heading line, anchor the marker above the first block
-        anchor = min((e.line for e in section.entities if e.line >= 0), default=0)
-        plan.before[anchor].insert(0, header)
+        anchor = _anchor_line(section)
+        if anchor >= 0:  # nothing to anchor to: emit no marker rather than line 0
+            plan.before[anchor].insert(0, _section_header(section, turn, style))
     for entity in section.entities:
         _label_entity(entity, style, plan)
 
@@ -149,7 +181,7 @@ def render_inline(msg: Message, turn: int, style: LabelStyle = ASCII) -> str:
     return "\n".join(out)
 
 
-def _excerpt(entity: Entity) -> str:
+def _excerpt(entity: Entity) -> str:  # ruff: ignore[too-many-return-statements]
     if isinstance(entity, Paragraph):
         text = entity.text
         return text if len(text) <= _MAP_EXCERPT else text[: _MAP_EXCERPT - 1] + "…"
@@ -160,6 +192,8 @@ def _excerpt(entity: Entity) -> str:
         return f"{len(entity.lines)} lines ({entity.lang or 'code'})"
     if isinstance(entity, ListBlock):
         return f"{len(entity.items)} items"
+    if isinstance(entity, Reference):
+        return f"{entity.key} → {entity.destination}"
     if isinstance(entity, Diagram | Quote):
         return type(entity).__name__.lower()  # "diagram" / "quote"
     return entity.heading or "(untitled)"  # Section

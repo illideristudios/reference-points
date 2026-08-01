@@ -112,6 +112,31 @@ def test_nested_subsection_path() -> None:
     assert ref.location is None
 
 
+def test_reference_entity_parses() -> None:
+    assert parse_ref("N1-S1.R1").path == (EntityStep("R", 1),)
+
+
+def test_a_match_may_select_the_entity_instead_of_an_index() -> None:
+    ref = parse_ref("N1-S1.R(/mdit/)")
+    assert ref.path == (EntityStep("R", None),)
+    assert ref.match == MatchLoc("mdit", every=False)
+    assert ref.location is None
+
+
+def test_entity_selection_by_match_is_not_reference_specific() -> None:
+    # The same relaxation for every letter: the paragraph about caching.
+    ref = parse_ref("N1-S1.P(/caching/)")
+    assert ref.path == (EntityStep("P", None),)
+    assert ref.match == MatchLoc("caching", every=False)
+
+
+def test_a_global_match_may_select_entities() -> None:
+    # `g` means "every match in scope" here as it does anywhere else.
+    ref = parse_ref("N1-S1.R(g/https/)")
+    assert ref.path == (EntityStep("R", None),)
+    assert ref.match == MatchLoc("https", every=True)
+
+
 def test_glyph_form_equivalent_to_ascii() -> None:
     assert parse_ref("◆27 §1 ·T2") == parse_ref("N27-S1.T2")
 
@@ -156,6 +181,26 @@ def test_two_locations_are_rejected() -> None:
 def test_empty_match_string_is_rejected() -> None:
     with pytest.raises(RefError, match="empty match"):
         parse_ref("N1-S1.T2.(//)")
+
+
+def test_reference_with_location_is_rejected() -> None:
+    with pytest.raises(RefError, match="R1 takes no location"):
+        parse_ref("N1-S1.R1.2")
+
+
+def test_entity_without_an_index_or_a_match_is_rejected() -> None:
+    with pytest.raises(RefError, match="needs an index"):
+        parse_ref("N1-S1.P")
+
+
+def test_only_the_terminal_step_may_be_selected_by_a_match() -> None:
+    with pytest.raises(RefError, match="needs an index"):
+        parse_ref("N1-S1.Q.P1(/x/)")
+
+
+def test_a_match_selected_entity_takes_no_location() -> None:
+    with pytest.raises(RefError, match="takes no location"):
+        parse_ref("N1-S1.P.2(/x/)")
 
 
 def test_stray_dash_is_rejected() -> None:

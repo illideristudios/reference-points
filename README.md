@@ -52,6 +52,13 @@ An address is `<N>-<S>.<E>.<L>` — **turN · Section · Entity · Location**.
 | `Q` | Quote (blockquote) | *container* — nests inner entities | `Q1.P1.2` |
 | `S` | Subsection | *container* — nests | `S2.P1` |
 | `D` | Diagram | **none** — `D1.<anything>` is rejected | `D1` |
+| `R` | Link reference definition (`[key]: url`) | **none** — `R1.<anything>` is rejected | `R1`, `R(/mdit/)` |
+
+`R` is the one entity that is **addressable but never labeled inline**: a
+definition renders to nothing, so a label would put visible text where the reader
+saw none — and would stop the line being a definition at all. `render_inline`
+leaves those lines byte-identical to the source; `render_map` carries their
+addresses.
 
 ### Match strings
 
@@ -59,6 +66,13 @@ Instead of a numeric location you can address by content:
 
 - `(/scheme/)` — the **single** match in scope. More than one match → `AMBIGUOUS`.
 - `(g/scheme/)` — **every** match in scope.
+
+A match can also stand in for an entity's **index**: `R(/mdit/)` is the reference
+whose definition matches, `P(/caching/)` the paragraph about caching, and
+`R(g/https/)` is every reference that matches. An `R` selector runs against the
+whole definition, so `(/mdit/)` finds it by key and
+`(/github.com/)` by URL, and it follows CommonMark label normalization: `[MDIT]`,
+`[ mdit ]` and `[mdit]` are one reference.
 
 ### How labels are rendered
 
@@ -82,10 +96,11 @@ Anything under `C` is stored **byte-for-byte** and addressed by line or by
 an entity: no content, no address, no label.
 
 **A labeled message still renders as markdown.** Heading markers are kept, so a
-heading stays a heading; and where a first line means what it means because of
-its leading characters — an indented code block, a `---` thematic break, an HTML
-block — the label moves to its own line with a blank line after it rather than
-corrupting the construct.
+heading stays a heading — an ATX line is rebuilt with its `#`s, a setext heading
+gets the label prefixed onto its text and keeps its underline. Where a first line
+means what it means because of its leading characters — an indented code block, a
+`---` thematic break, an HTML block — the label moves to its own line with a blank
+line after it rather than corrupting the construct.
 
 ## Rejection is loud
 
@@ -107,7 +122,10 @@ uv run pyright           # typecheck (strict on src)
 
 Layout: `src/reference_points/` (`grammar` · `decompose` · `resolve` · `render`
 · `__main__`), one test module per source module under `tests/`. Built with the
-`uv` toolchain; `uv.lock` is committed.
+`uv` toolchain; `uv.lock` is committed. Block structure comes from
+[`markdown-it-py`](https://github.com/executablebooks/markdown-it-py), the one
+runtime dependency — `decompose` maps its token stream onto the entity alphabet
+rather than scanning markdown itself.
 
 ## License
 
