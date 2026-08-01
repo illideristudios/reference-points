@@ -133,6 +133,62 @@ def test_nested_subsection_is_a_section_entity() -> None:
     assert sub[0].index == 1
 
 
+INDENTED = "alpha.\n\n    indented line one\n    indented line two\n\nbeta.\n"
+
+
+def test_indented_code_block_is_verbatim_not_prose() -> None:
+    # It used to fall through to _consume_paragraph, which strips each line and
+    # joins them — destroying the content the block exists to preserve.
+    entities = decompose(INDENTED).sections[0].entities
+    assert [type(e) for e in entities] == [Paragraph, CodeBlock, Paragraph]
+    code = entities[1]
+    assert isinstance(code, CodeBlock)
+    assert code.lang is None
+    assert code.lines == ("indented line one", "indented line two")
+
+
+def test_indented_code_does_not_interrupt_a_paragraph() -> None:
+    # CommonMark: an indented line following prose with no blank between is a
+    # lazy continuation of the paragraph, not a code block.
+    entities = decompose("alpha.\n    still alpha.\n").sections[0].entities
+    assert [type(e) for e in entities] == [Paragraph]
+
+
+HTML_BLOCK = "<details>\n<summary>Click to expand</summary>\n\nHidden prose.\n\n</details>\n"
+
+
+def test_html_block_is_one_verbatim_code_entity() -> None:
+    code = decompose(HTML_BLOCK).sections[0].entities[0]
+    assert isinstance(code, CodeBlock)
+    assert code.lang == "html"
+    assert code.lines == ("<details>", "<summary>Click to expand</summary>")
+
+
+def test_markdown_between_html_tags_is_still_a_paragraph() -> None:
+    # CommonMark HTML block type 6 ends at the blank line, so the prose between
+    # the tags is ordinary markdown — this is correct, not a gap.
+    entities = decompose(HTML_BLOCK).sections[0].entities
+    assert [type(e) for e in entities] == [CodeBlock, Paragraph, CodeBlock]
+    para = entities[1]
+    assert isinstance(para, Paragraph)
+    assert para.text == "Hidden prose."
+
+
+def test_thematic_break_is_not_an_entity() -> None:
+    # No addressable content: consume it and emit nothing.
+    entities = decompose("alpha.\n\n---\n\nbeta.\n").sections[0].entities
+    assert [type(e) for e in entities] == [Paragraph, Paragraph]
+    assert [e.index for e in entities] == [1, 2]
+
+
+def test_an_indented_bullet_stays_a_list_item() -> None:
+    # List dispatch must precede indented-code dispatch or a nested bullet reads
+    # as code.
+    lst = decompose("- top level\n    - doubly nested bullet\n").sections[0].entities[0]
+    assert isinstance(lst, ListBlock)
+    assert lst.items == ("top level", "doubly nested bullet")
+
+
 def test_preamble_before_first_heading_is_implicit_section_one() -> None:
     md = "Intro sentence.\n\n## Real Heading\n\nBody.\n"
     msg = decompose(md)

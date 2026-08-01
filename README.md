@@ -48,7 +48,7 @@ An address is `<N>-<S>.<E>.<L>` — **turN · Section · Entity · Location**.
 | `P` | Paragraph | sentence number | `P1.4` = 4th sentence |
 | `T` | Table | `row`, `row,col`, or `,col` | `T2.3`, `T2.3,4`, `T2.,4` |
 | `L` | List | item number | `L1.2` = 2nd item |
-| `C` | Code block | line number (verbatim, `\n`-delimited) | `C1.5` = 5th line |
+| `C` | Verbatim block — fenced, indented, or raw HTML | line number (`\n`-delimited) | `C1.5` = 5th line |
 | `Q` | Quote (blockquote) | *container* — nests inner entities | `Q1.P1.2` |
 | `S` | Subsection | *container* — nests | `S2.P1` |
 | `D` | Diagram | **none** — `D1.<anything>` is rejected | `D1` |
@@ -76,6 +76,10 @@ Pass `--glyphs` for the monochrome set instead:
 
 The choice is display-only: `parse_ref` accepts **both** forms, so a label
 resolves in whichever style emitted it.
+
+Anything under `C` is stored **byte-for-byte** and addressed by line or by
+`(/match/)` — never split into sentences. A thematic break (`---`, `***`) is not
+an entity: no content, no address, no label.
 
 **A labeled message still renders as markdown.** Heading markers are kept, so a
 heading stays a heading; and where a first line means what it means because of

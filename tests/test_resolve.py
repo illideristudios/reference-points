@@ -144,6 +144,24 @@ def test_resolves_a_code_line() -> None:
     assert resolve(parse_ref("N1-S1.C1.2"), msg).content == "b = 2"
 
 
+def test_resolves_a_line_of_an_indented_code_block() -> None:
+    msg = decompose("alpha.\n\n    indented line one\n    indented line two\n")
+    assert resolve(parse_ref("N1-S1.C1.2"), msg).content == "indented line two"
+
+
+def test_resolves_an_html_line_by_match() -> None:
+    msg = decompose("<details>\n<summary>Click to expand</summary>\n")
+    result = resolve(parse_ref("N1-S1.C1.(/summary/)"), msg)
+    assert result.content == "<summary>Click to expand</summary>"
+
+
+def test_a_verbatim_block_is_not_addressable_as_prose() -> None:
+    # It used to resolve as P1 with the lines joined into a "sentence".
+    msg = decompose("<details>\n<summary>Click to expand</summary>\n")
+    with pytest.raises(ResolveError, match="no P1 here"):
+        resolve(parse_ref("N1-S1.P1"), msg)
+
+
 def test_resolves_a_list_item() -> None:
     msg = decompose("- alpha\n- beta\n- gamma\n")
     assert resolve(parse_ref("N1-S1.L1.3"), msg).content == "gamma"

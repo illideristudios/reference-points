@@ -55,23 +55,38 @@ def test_labeling_preserves_every_heading_level() -> None:
     assert "###### .S1 Six" in out
 
 
-def test_position_sensitive_first_lines_keep_their_own_label_line() -> None:
-    # A paragraph label is normally an inline prefix, but these first lines mean
-    # something *because* of their leading characters. Prefixing would destroy
-    # the construct, so the label goes on its own line above instead.
+def test_position_sensitive_blocks_keep_their_own_label_line() -> None:
+    # These first lines mean something *because* of their leading characters, so
+    # the label goes on its own line above — and the blank line after it is
+    # load-bearing, or the construct below becomes a lazy continuation of the
+    # label's own paragraph.
     for source, first_line in (
         ("alpha.\n\n    indented code\n", "    indented code"),
-        ("alpha.\n\n---\n", "---"),
-        ("alpha.\n\n***\n", "***"),
         ("alpha.\n\n<details>\n<summary>s</summary>\n", "<details>"),
     ):
         lines = render_inline(decompose(source), turn=1).splitlines()
         assert first_line in lines, f"{first_line!r} was mutated: {lines!r}"
-        # The label must be followed by a blank line, or the construct below is
-        # absorbed as a lazy continuation of the label's own paragraph.
-        blank_above = lines[lines.index(first_line) - 1]
-        assert not blank_above, f"no blank line after label: {lines!r}"
-        assert ".P2" in lines
+        at = lines.index(first_line)
+        assert not lines[at - 1], f"no blank line after label: {lines!r}"
+        assert lines[at - 2] == ".C1", f"expected a code label above: {lines!r}"
+
+
+def test_no_label_lands_inside_a_verbatim_block() -> None:
+    src = "    indented line one\n    indented line two\n"
+    lines = render_inline(decompose(src), turn=1).splitlines()
+    at = lines.index("    indented line one")
+    assert lines[at + 1] == "    indented line two"
+
+    lines = render_inline(decompose("<details>\n<summary>s</summary>\n"), turn=1).splitlines()
+    at = lines.index("<details>")
+    assert lines[at + 1] == "<summary>s</summary>"
+
+
+def test_a_thematic_break_gets_no_label() -> None:
+    lines = render_inline(decompose("alpha.\n\n---\n\nbeta.\n"), turn=1).splitlines()
+    at = lines.index("---")
+    assert not lines[at - 1], f"the break's surroundings were edited: {lines!r}"
+    assert ".P2 beta." in lines
 
 
 def test_ordinary_paragraph_label_stays_inline() -> None:

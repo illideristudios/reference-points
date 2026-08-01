@@ -52,7 +52,7 @@ its paragraph 1, sentence 2.
 | `P` | Paragraph | `.<sentence>` | sentence index within the paragraph |
 | `T` | Table | `.<row>` · `.<row>,<col>` · `.,<col>` | row, cell, or whole column |
 | `L` | List | `.<item>` | item index |
-| `C` | Code block | `.<line>` | verbatim, `\n`-delimited logical line |
+| `C` | Verbatim block | `.<line>` | fenced, indented, or raw HTML; `\n`-delimited logical line |
 | `Q` | Quote | *(container)* | blockquote; nests inner entities |
 | `S` | Subsection | *(container)* | markdown heading; nests |
 | `D` | Diagram | **none** | `D<n>.<anything>` is REJECTED |
@@ -72,11 +72,14 @@ E.g. `N27-S1.T2.(/Team/)` = the row in table 2 that uniquely contains "Team".
 3. **Nesting depth / does the index reset?** Arbitrary nesting; a location
    attaches only to the terminal entity, so "reset per level" is a non-issue.
 4. **Do lists / code / quotes get letters?** Yes: `L`, `C`, `Q` added to the
-   spec's `T·D·P·S`. **No `H` (raw-HTML) entity** — HTML that gets *displayed* is
-   fenced, so it is a `C` code block; interpreted container HTML (`<details>`)
-   renders as plain text in a terminal and is not emitted as an entity; an HTML
+   spec's `T·D·P·S`. **No `H` (raw-HTML) entity** — `C` is the *verbatim block*
+   entity and raw HTML is one, alongside fenced and indented blocks. All three
+   share the property that decides the location shape: their content is
+   preserved exactly, so the coordinate is a **line**, never a sentence. An HTML
    `<table>` maps onto `T` (parsing TODO).
-5. **Label density?** Every substantive block is addressable.
+5. **Label density?** Every substantive block is addressable. A **thematic break**
+   (`---`, `***`, `___`) is the exception: it is a visual rule with no content to
+   address, so it is not an entity and carries no label.
 6. **Rejection UX?** Fail loud, name the defect, wait — never guess. Examples:
    `REJECTED: missing turn number`, `REJECTED: D1 takes no location`,
    `AMBIGUOUS: 3 matches for (/scheme/)`, `no such row 9 in T2`.

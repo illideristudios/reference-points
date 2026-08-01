@@ -16,6 +16,10 @@ _FENCE_RE = re.compile(r"^\s*(```+|~~~+)\s*([^\s`~]*)")
 _LIST_ITEM_RE = re.compile(r"^\s*([-*+]|\d+[.)])\s+(.*)$")
 _TABLE_SEP_RE = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[\"'(\[]?[A-Z0-9])")
+_INDENTED_CODE_RE = re.compile(r"^(?: {4}|\t)")
+_HTML_BLOCK_RE = re.compile(r"^ {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[ \t/>]|$)")
+# Public: the renderer needs it too, and one construct gets exactly one regex.
+THEMATIC_BREAK_RE = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
 
 _DIAGRAM_LANGS = frozenset({"mermaid", "dot", "graphviz"})
 
@@ -41,7 +45,8 @@ class Table:
 
 @dataclass(frozen=True)
 class CodeBlock:
-    """A fenced code block. Location = 1-indexed logical (``\\n``-delimited) line."""
+    """A verbatim block — fenced, indented, or raw HTML. Its content is preserved
+    exactly, so the location is a 1-indexed logical (``\\n``-delimited) line."""
 
     index: int
     line: int
@@ -169,6 +174,50 @@ def _consume_code(
     ), end - start
 
 
+def _strip_indent(line: str) -> str:
+    """Drop the 4-space/tab marker so an indented block's lines read like a fence's."""
+    if line.startswith("\t"):
+        return line[1:]
+    return line[4:] if line.startswith("    ") else line
+
+
+def _consume_indented_code(
+    lines: list[str], start: int, counter: _Counter, offset: int
+) -> tuple[Entity, int]:
+    body: list[str] = []
+    i = start
+    while i < len(lines) and (_INDENTED_CODE_RE.match(lines[i]) or _is_blank(lines[i])):
+        body.append(lines[i])
+        i += 1
+    while body and _is_blank(body[-1]):  # trailing blanks belong to the document
+        body.pop()
+        i -= 1
+    return CodeBlock(
+        index=counter.next("C"),
+        line=offset + start,
+        lang=None,
+        lines=tuple(_strip_indent(line) for line in body),
+    ), i - start
+
+
+def _consume_html(
+    lines: list[str], start: int, counter: _Counter, offset: int
+) -> tuple[Entity, int]:
+    """Consume a raw HTML block — CommonMark type 6/7, so it ends at a blank line.
+
+    Markdown *between* an opening and closing tag is therefore ordinary markdown,
+    which is correct: only the tag runs themselves are verbatim.
+    """
+    body: list[str] = []
+    i = start
+    while i < len(lines) and not _is_blank(lines[i]):
+        body.append(lines[i])
+        i += 1
+    return CodeBlock(
+        index=counter.next("C"), line=offset + start, lang="html", lines=tuple(body)
+    ), i - start
+
+
 def _consume_table(
     lines: list[str], start: int, counter: _Counter, offset: int
 ) -> tuple[Entity, int]:
@@ -223,18 +272,28 @@ def _consume_paragraph(
 
 
 def _block_starts_here(lines: list[str], i: int) -> bool:
-    """True if a non-paragraph block begins at ``i`` (used to end a paragraph run)."""
+    """True if a non-paragraph block begins at ``i`` (used to end a paragraph run).
+
+    Indented code is deliberately absent: per CommonMark it cannot interrupt a
+    paragraph — an indented line under prose is a lazy continuation of it.
+    """
     line = lines[i]
     return (
         _heading(line) is not None
         or _FENCE_RE.match(line) is not None
+        or THEMATIC_BREAK_RE.match(line) is not None
         or line.lstrip().startswith(">")
         or _LIST_ITEM_RE.match(line) is not None
         or _looks_like_table(lines, i)
+        or _HTML_BLOCK_RE.match(line) is not None
     )
 
 
-def _consume_block(lines: list[str], i: int, counter: _Counter, offset: int) -> tuple[Entity, int]:
+# A flat dispatch table written as ifs — the order *is* the documentation, so it
+# does not get split to satisfy a return-count threshold.
+def _consume_block(  # ruff: ignore[too-many-return-statements]
+    lines: list[str], i: int, counter: _Counter, offset: int
+) -> tuple[Entity, int]:
     line = lines[i]
     if _FENCE_RE.match(line):
         return _consume_code(lines, i, counter, offset)
@@ -242,8 +301,12 @@ def _consume_block(lines: list[str], i: int, counter: _Counter, offset: int) -> 
         return _consume_quote(lines, i, counter, offset)
     if _looks_like_table(lines, i):
         return _consume_table(lines, i, counter, offset)
-    if _LIST_ITEM_RE.match(line):
+    if _LIST_ITEM_RE.match(line):  # before indented code: a nested bullet is a list item
         return _consume_list(lines, i, counter, offset)
+    if _HTML_BLOCK_RE.match(line):
+        return _consume_html(lines, i, counter, offset)
+    if _INDENTED_CODE_RE.match(line):
+        return _consume_indented_code(lines, i, counter, offset)
     return _consume_paragraph(lines, i, counter, offset)
 
 
@@ -257,7 +320,9 @@ def _parse_container(lines: list[str], offset: int = 0) -> list[Entity]:
     counter = _Counter()
     i = 0
     while i < len(lines):
-        if _is_blank(lines[i]):
+        # Blank lines and thematic breaks carry no addressable content: a break is
+        # a visual rule, so it is consumed and never becomes an entity.
+        if _is_blank(lines[i]) or THEMATIC_BREAK_RE.match(lines[i]):
             i += 1
             continue
         head = _heading(lines[i])

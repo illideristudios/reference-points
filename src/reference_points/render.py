@@ -13,11 +13,11 @@ accepts either, so a label always resolves in whichever style emitted it.
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 
 from reference_points.decompose import (
+    THEMATIC_BREAK_RE,
     CodeBlock,
     Diagram,
     Entity,
@@ -55,16 +55,13 @@ def _section_header(section: Section, turn: int, style: LabelStyle) -> str:
     return f"{head} {section.heading}" if section.heading else head
 
 
-_THEMATIC_BREAK_RE = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
-
-
 def _is_position_sensitive(line: str) -> bool:
     """True when a line means what it means *because of* its leading characters,
-    so prefixing a label onto it would destroy the construct — an indented code
-    block, a thematic break, or the start of an HTML block."""
+    so a label written onto or immediately above it would destroy the construct —
+    an indented code block, a thematic break, or the start of an HTML block."""
     return (
         line.startswith(("    ", "\t"))
-        or _THEMATIC_BREAK_RE.match(line) is not None
+        or THEMATIC_BREAK_RE.match(line) is not None
         or line.lstrip().startswith("<")
     )
 
@@ -79,16 +76,27 @@ class _LabelPlan:
     prefix: dict[int, str] = field(default_factory=dict[int, str])
     replace: dict[int, str] = field(default_factory=dict[int, str])
 
-    def label_paragraph(self, line: int, tag: str) -> None:
-        """Inline prefix by default; own line above when prefixing would corrupt.
+    def label_above(self, line: int, tag: str) -> None:
+        """Put the tag on its own line above ``line``, plus a blank line when the
+        target's leading characters are load-bearing.
 
-        The blank line is load-bearing: without it the construct below becomes a
-        lazy continuation of the label's paragraph, which turns ``---`` into a
-        setext heading and an indented block into ordinary prose."""
-        if line < len(self.lines) and _is_position_sensitive(self.lines[line]):
-            self.before[line].extend((tag, ""))
+        That blank line is the whole rule: without it the construct below becomes
+        a lazy continuation of the label's paragraph, which turns an indented
+        block into ordinary prose and ``---`` into a setext heading.
+        """
+        self.before[line].append(tag)
+        if self._is_sensitive(line):
+            self.before[line].append("")
+
+    def label_paragraph(self, line: int, tag: str) -> None:
+        """Inline prefix by default; above when prefixing would corrupt the line."""
+        if self._is_sensitive(line):
+            self.label_above(line, tag)
         else:
             self.prefix[line] = tag
+
+    def _is_sensitive(self, line: int) -> bool:
+        return line < len(self.lines) and _is_position_sensitive(self.lines[line])
 
 
 def _heading_line(level: int, label: str, heading: str) -> str:
@@ -109,7 +117,7 @@ def _label_entity(entity: Entity, style: LabelStyle, plan: _LabelPlan) -> None:
     else:
         # Table, CodeBlock, ListBlock, Diagram, Quote: label on its own line above.
         # (v1: quote inner entities resolve but are not sub-labeled inline.)
-        plan.before[entity.line].append(tag)
+        plan.label_above(entity.line, tag)
 
 
 def _label_section(section: Section, turn: int, style: LabelStyle, plan: _LabelPlan) -> None:
