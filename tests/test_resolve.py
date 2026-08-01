@@ -276,3 +276,47 @@ def test_every_failure_names_its_category(worked_msg: Message, address: str, pre
     with pytest.raises((RefError, ResolveError)) as caught:
         resolve(parse_ref(address), worked_msg)
     assert str(caught.value).startswith(f"{prefix}: ")
+
+
+@pytest.mark.parametrize(("address", "prefix"), FAILURES)
+def test_every_failure_says_what_to_type_instead(
+    worked_msg: Message, address: str, prefix: str
+) -> None:
+    # A rejection that does not end in a next address leaves the caller guessing,
+    # which is the thing this grammar exists to stop.
+    with pytest.raises((RefError, ResolveError)) as caught:
+        resolve(parse_ref(address), worked_msg)
+    hint = str(caught.value).split("\n  -> ")
+    assert len(hint) == 2, f"{prefix} for {address!r} carries no hint"
+    assert hint[1].strip(), f"{prefix} for {address!r} carries an empty hint"
+
+
+def test_a_missing_entity_lists_what_is_in_scope(worked_msg: Message) -> None:
+    with pytest.raises(ResolveError, match=r"in scope, in order: P1, T1, P2"):
+        resolve(parse_ref("N27-S1.T2"), worked_msg)
+
+
+def test_an_out_of_range_row_says_how_many_there_are(worked_msg: Message) -> None:
+    with pytest.raises(ResolveError, match=r"T1 has 4 rows, counting the header as row 1"):
+        resolve(parse_ref("N27-S1.T1.9"), worked_msg)
+
+
+def test_an_ambiguous_match_shows_the_matches_it_found(worked_msg: Message) -> None:
+    # Choosing between them is impossible without seeing them.
+    with pytest.raises(ResolveError) as caught:
+        resolve(parse_ref(r"N27-S1.T1.(/\$/)"), worked_msg)
+    shown = str(caught.value).splitlines()
+    assert shown[0] == r"AMBIGUOUS: 3 matches for (/\$/) in T1"
+    assert [line.strip() for line in shown[1:4]] == [
+        "| Free | $0 | 1 |",
+        "| Pro | $12 | 5 |",
+        "| Team | $40 | 20 |",
+    ]
+    assert shown[4] == r"  -> use T1.(g/\$/) for all 3, or narrow the pattern"
+
+
+def test_an_ambiguous_listing_is_capped() -> None:
+    rows = "\n".join(f"| row {n} | x |" for n in range(1, 21))
+    msg = decompose(f"| a | b |\n|---|---|\n{rows}\n")
+    with pytest.raises(ResolveError, match=r"… and 12 more"):
+        resolve(parse_ref("N1-S1.T1.(/row/)"), msg)

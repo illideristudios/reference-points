@@ -119,18 +119,50 @@ line after it rather than corrupting the construct.
 ## Rejection is loud
 
 A malformed or unresolvable address never guesses. Every failure names its
-**category** first, so you can sort "I typed it wrong" from "it is not there"
-without reading the prose:
+**category**, says what happened, and ends in the address to type instead:
 
-| Prefix | Means | Example |
-|--------|-------|---------|
-| `REJECTED:` | the address breaks the grammar, or the shape it landed on | `REJECTED: missing turn number` · `REJECTED: D1 takes no location` · `REJECTED: P1 is not a container; cannot address inside it` |
-| `INVALID:` | the address is fine, its regex is not | `INVALID: regex (/[/): unterminated character set at position 0` |
-| `MISSING:` | well-formed, and nothing is there | `MISSING: no T2 here` · `MISSING: no such row 9 in T2 (has 4)` · `MISSING: no match for (/scheme/) in T2` |
-| `AMBIGUOUS:` | well-formed, and more than one thing is there | `AMBIGUOUS: 3 matches for (/scheme/) in T2` |
+```
+REJECTED: missing turn number
+  -> every address starts with the turn it points into: N1-S1.P1
+
+REJECTED: D1 takes no location
+  -> use D1 on its own — a diagram has no addressable parts
+
+REJECTED: P1 is not a container; cannot address inside it
+  -> use P1.2 for a sentence, or P1.(/word/) to match inside it
+
+INVALID: regex (/[/): unterminated character set at position 0
+  -> a match body is a regex — escape the metacharacters you meant literally, as in (/\$40/)
+
+MISSING: no T2 here
+  -> in scope, in order: P1, T1, P2
+
+MISSING: no such row 9 in T1
+  -> T1 has 4 rows, counting the header as row 1
+
+AMBIGUOUS: 3 matches for (/\$/) in T1
+     | Free | $0 | 1 |
+     | Pro | $12 | 5 |
+     | Team | $40 | 20 |
+  -> use T1.(g/\$/) for all 3, or narrow the pattern
+```
+
+The four categories let you sort "I typed it wrong" from "it is not there" without
+reading the prose:
+
+| Prefix | Means |
+|--------|-------|
+| `REJECTED:` | the address breaks the grammar, or the shape it landed on |
+| `INVALID:` | the address is fine, its regex is not |
+| `MISSING:` | well-formed, and nothing is there |
+| `AMBIGUOUS:` | well-formed, and more than one thing is there |
+
+An `AMBIGUOUS` lists what it found — up to eight, then a count — because choosing
+between candidates is impossible without seeing them.
 
 `parse_ref` raises `RefError` (always `REJECTED`) and `resolve` raises
-`ResolveError` carrying one of the four. The CLI prints the message unchanged and
+`ResolveError` carrying one of the four; both take their hint as a required
+argument, so none can ship without one. The CLI prints the message unchanged and
 exits 1; a file it cannot read is `UNREADABLE:`, which is not an address defect.
 
 ## Development

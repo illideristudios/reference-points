@@ -206,3 +206,18 @@ def test_a_match_selected_entity_takes_no_location() -> None:
 def test_stray_dash_is_rejected() -> None:
     with pytest.raises(RefError):
         parse_ref("N1-S1.P1-S2")
+
+
+def test_an_unknown_letter_lists_the_ones_that_exist() -> None:
+    with pytest.raises(RefError, match=r"P paragraph, T table"):
+        parse_ref("N1-S1.X1")
+
+
+def test_a_container_hint_names_a_legal_way_in() -> None:
+    with pytest.raises(RefError, match=r"use Q1\.P1 for a paragraph inside it"):
+        parse_ref("N1-S1.Q1.3")
+
+
+def test_a_diagram_hint_says_it_has_no_parts() -> None:
+    with pytest.raises(RefError, match=r"use D1 on its own"):
+        parse_ref("N1-S1.D1.2")

@@ -23,7 +23,14 @@ from reference_points.decompose import (
     Section,
     Table,
 )
-from reference_points.grammar import AMBIGUOUS, INVALID, MISSING, REJECTED
+from reference_points.grammar import (
+    AMBIGUOUS,
+    INVALID,
+    MISSING,
+    REJECTED,
+    format_failure,
+    location_form,
+)
 
 if TYPE_CHECKING:
     from reference_points.grammar import EntityStep, Location, MatchLoc, Ref, TableLoc
@@ -42,10 +49,37 @@ _LETTER_TO_TYPE: dict[str, type[Entity]] = {
 
 class ResolveError(Exception):
     """A well-formed address that points at nothing, at more than one thing, or at
-    the wrong shape. ``kind`` is required, so a message cannot ship uncategorized."""
+    the wrong shape. ``kind`` and ``hint`` are both required, so no message ships
+    uncategorized or without a remedy."""
 
-    def __init__(self, kind: str, message: str) -> None:
-        super().__init__(f"{kind}: {message}")
+    def __init__(self, kind: str, message: str, hint: str) -> None:
+        super().__init__(format_failure(kind, message, hint))
+
+
+_SHOWN = 8  # a typo should not paginate the terminal
+_SHOWN_WIDTH = 72
+
+
+def _listing(items: list[str]) -> str:
+    """The candidates themselves, indented under the message. Choosing between
+    them is impossible without seeing them, which is the whole of an AMBIGUOUS."""
+    lines = [f"     {_clip(item)}" for item in items[:_SHOWN]]
+    if len(items) > _SHOWN:
+        lines.append(f"     … and {len(items) - _SHOWN} more")
+    return "\n".join(lines)
+
+
+def _clip(text: str) -> str:
+    flat = " ".join(text.split())
+    return flat if len(flat) <= _SHOWN_WIDTH else flat[: _SHOWN_WIDTH - 1] + "…"
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def _every(match: MatchLoc) -> str:
+    return f"(g/{match.text}/)"
 
 
 @dataclass(frozen=True)
@@ -71,16 +105,29 @@ def _compile(match: MatchLoc, *, ignore_case: bool = False) -> re.Pattern[str]:
     try:
         return re.compile(match.text, re.IGNORECASE if ignore_case else 0)
     except re.error as err:
-        raise ResolveError(INVALID, f"regex {_fmt_match(match)}: {err}") from err
+        raise ResolveError(
+            INVALID,
+            f"regex {_fmt_match(match)}: {err}",
+            "a match body is a regex — escape the metacharacters you meant "
+            r"literally, as in (/\$40/)",
+        ) from err
 
 
 def _apply_match(matches: list[str], match: MatchLoc, scope: str) -> str:
     if not matches:
-        raise ResolveError(MISSING, f"no match for {_fmt_match(match)} in {scope}")
+        raise ResolveError(
+            MISSING,
+            f"no match for {_fmt_match(match)} in {scope}",
+            "matching is case-sensitive; use (/(?i:word)/) to ignore case",
+        )
     if match.every:
         return "\n".join(matches)
     if len(matches) > 1:
-        raise ResolveError(AMBIGUOUS, f"{len(matches)} matches for {_fmt_match(match)} in {scope}")
+        raise ResolveError(
+            AMBIGUOUS,
+            f"{len(matches)} matches for {_fmt_match(match)} in {scope}\n{_listing(matches)}",
+            f"use {scope}.{_every(match)} for all {len(matches)}, or narrow the pattern",
+        )
     return matches[0]
 
 
@@ -90,7 +137,11 @@ def _narrow(units: tuple[str, ...], location: Location, kind: str, label: str) -
     if location is None:
         return units
     if not isinstance(location, int) or not 1 <= location <= len(units):
-        raise ResolveError(MISSING, f"no such {kind} {location} in {label} (has {len(units)})")
+        raise ResolveError(
+            MISSING,
+            f"no such {kind} {location} in {label}",
+            f"{label} has {_plural(len(units), kind)}",
+        )
     return (units[location - 1],)
 
 
@@ -104,7 +155,18 @@ def _find_section(msg: Message, index: int) -> Section:
     for section in msg.sections:
         if section.index == index:
             return section
-    raise ResolveError(MISSING, f"no section {index} in this message")
+    available = ", ".join(f"S{section.index}" for section in msg.sections)
+    raise ResolveError(
+        MISSING, f"no section {index} in this message", f"this message has {available}"
+    )
+
+
+def _inventory(entities: tuple[Entity, ...]) -> str:
+    """What is addressable at this level, in order — the answer to "then what *is*
+    here?", which is the only question a missing entity leaves you with."""
+    if not entities:
+        return "nothing is addressable at this level"
+    return "in scope, in order: " + ", ".join(f"{type(e).__name__[0]}{e.index}" for e in entities)
 
 
 def _find_entity(entities: tuple[Entity, ...], letter: str, index: int) -> Entity:
@@ -112,7 +174,7 @@ def _find_entity(entities: tuple[Entity, ...], letter: str, index: int) -> Entit
     for entity in entities:
         if isinstance(entity, expected) and entity.index == index:
             return entity
-    raise ResolveError(MISSING, f"no {letter}{index} here")
+    raise ResolveError(MISSING, f"no {letter}{index} here", _inventory(entities))
 
 
 def _entity_text(entity: Entity) -> str:
@@ -132,15 +194,26 @@ def _select_entities(
     if step.index is not None:
         return [_find_entity(entities, step.letter, step.index)]
     if match is None:  # parse_ref forbids this; keep the walk total, never guess
-        raise ResolveError(REJECTED, f"{step.letter} needs an index or a match")
+        raise ResolveError(
+            REJECTED,
+            f"{step.letter} needs an index or a match",
+            f"use {step.letter}1, or {step.letter}(/word/) to select it by content",
+        )
     expected = _LETTER_TO_TYPE[step.letter]
     pattern = _compile(match, ignore_case=expected is Reference)
     hits = [e for e in entities if isinstance(e, expected) and pattern.search(_entity_text(e))]
     scope = f"the {step.letter} entities here"
     if not hits:
-        raise ResolveError(MISSING, f"no match for {_fmt_match(match)} in {scope}")
+        raise ResolveError(
+            MISSING, f"no match for {_fmt_match(match)} in {scope}", _inventory(entities)
+        )
     if len(hits) > 1 and not match.every:
-        raise ResolveError(AMBIGUOUS, f"{len(hits)} matches for {_fmt_match(match)} in {scope}")
+        shown = [f"{step.letter}{e.index}  {_entity_text(e)}" for e in hits]
+        raise ResolveError(
+            AMBIGUOUS,
+            f"{len(hits)} matches for {_fmt_match(match)} in {scope}\n{_listing(shown)}",
+            f"use {step.letter}{_every(match)} for all {len(hits)}, or address one by index",
+        )
     return hits
 
 
@@ -157,6 +230,7 @@ def _walk(section: Section, ref: Ref) -> list[Entity]:
                 raise ResolveError(
                     REJECTED,
                     f"{step.letter}{step.index} is not a container; cannot address inside it",
+                    f"use {location_form(step.letter, step.index)}",
                 )
             entities = inner.entities
     return current
@@ -172,16 +246,29 @@ def _resolve_paragraph(para: Paragraph, location: Location, match: MatchLoc | No
         if not 1 <= location <= len(para.sentences):
             raise ResolveError(
                 MISSING,
-                f"no such sentence {location} in P{para.index} (has {len(para.sentences)})",
+                f"no such sentence {location} in P{para.index}",
+                f"P{para.index} has {_plural(len(para.sentences), 'sentence')}",
             )
         return Resolution("sentence", para.sentences[location - 1])
-    raise ResolveError(REJECTED, f"P{para.index} takes a sentence number, not a cell reference")
+    raise ResolveError(
+        REJECTED,
+        f"P{para.index} takes a sentence number, not a cell reference",
+        f"use {location_form('P', para.index)}",
+    )
+
+
+def _table_rows_hint(table: Table) -> str:
+    return f"T{table.index} has {_plural(len(table.rows), 'row')}, counting the header as row 1"
 
 
 def _resolve_table_cell(table: Table, loc: TableLoc) -> Resolution:
     width = len(table.rows[0]) if table.rows else 0
     if loc.col is not None and not 1 <= loc.col <= width:
-        raise ResolveError(MISSING, f"no such column {loc.col} in T{table.index} (has {width})")
+        raise ResolveError(
+            MISSING,
+            f"no such column {loc.col} in T{table.index}",
+            f"T{table.index} has {_plural(width, 'column')}",
+        )
     if loc.row is None:  # whole column
         column = [
             row[loc.col - 1] for row in table.rows if loc.col is not None and loc.col <= len(row)
@@ -189,7 +276,7 @@ def _resolve_table_cell(table: Table, loc: TableLoc) -> Resolution:
         return Resolution("column", "\n".join(column))
     if not 1 <= loc.row <= len(table.rows):
         raise ResolveError(
-            MISSING, f"no such row {loc.row} in T{table.index} (has {len(table.rows)})"
+            MISSING, f"no such row {loc.row} in T{table.index}", _table_rows_hint(table)
         )
     cell = table.rows[loc.row - 1][loc.col - 1] if loc.col is not None else ""
     return Resolution("cell", cell)
@@ -205,15 +292,21 @@ def _resolve_table(table: Table, location: Location, match: MatchLoc | None) -> 
     if isinstance(location, int):
         if not 1 <= location <= len(table.rows):
             raise ResolveError(
-                MISSING, f"no such row {location} in T{table.index} (has {len(table.rows)})"
+                MISSING, f"no such row {location} in T{table.index}", _table_rows_hint(table)
             )
         return Resolution("row", rows[location - 1])
     return _resolve_table_cell(table, location)
 
 
 def _resolve_indexed(
-    items: tuple[str, ...], location: Location, match: MatchLoc | None, kind: str, label: str
+    entity: ListBlock | CodeBlock, location: Location, match: MatchLoc | None
 ) -> Resolution:
+    """A list's items and a verbatim block's lines are the same shape: a 1-indexed
+    run of strings, addressed by number or matched against."""
+    items = entity.items if isinstance(entity, ListBlock) else entity.lines
+    kind = "item" if isinstance(entity, ListBlock) else "line"
+    letter = type(entity).__name__[0]
+    label = f"{letter}{entity.index}"
     if match is not None:
         units = _narrow(items, location, kind, label)
         return _match_units(units, match, kind, label)
@@ -221,31 +314,39 @@ def _resolve_indexed(
         return Resolution(kind, "\n".join(items))
     if isinstance(location, int):
         if not 1 <= location <= len(items):
-            raise ResolveError(MISSING, f"no such {kind} {location} in {label} (has {len(items)})")
+            raise ResolveError(
+                MISSING,
+                f"no such {kind} {location} in {label}",
+                f"{label} has {_plural(len(items), kind)}",
+            )
         return Resolution(kind, items[location - 1])
-    raise ResolveError(REJECTED, f"{label} takes a single number, not a cell reference")
+    raise ResolveError(
+        REJECTED,
+        f"{label} takes a single number, not a cell reference",
+        f"use {location_form(letter, entity.index)}",
+    )
 
 
 def _resolve_container(entity: Section | Quote, location: Location) -> Resolution:
     if location is not None:  # parse should have rejected this already
-        raise ResolveError(REJECTED, "a container takes no direct location")
+        raise ResolveError(
+            REJECTED,
+            "a container takes no direct location",
+            f"use {location_form(type(entity).__name__[0], entity.index)}",
+        )
     parts = [resolve_entity(child, None, None).content for child in entity.entities]
     kind = "section" if isinstance(entity, Section) else "quote"
     return Resolution(kind, "\n".join(parts))
 
 
-def resolve_entity(  # ruff: ignore[too-many-return-statements]
-    entity: Entity, location: Location, match: MatchLoc | None
-) -> Resolution:
+def resolve_entity(entity: Entity, location: Location, match: MatchLoc | None) -> Resolution:
     """They compose: the location narrows the scope, the match filters within it."""
     if isinstance(entity, Paragraph):
         return _resolve_paragraph(entity, location, match)
     if isinstance(entity, Table):
         return _resolve_table(entity, location, match)
-    if isinstance(entity, ListBlock):
-        return _resolve_indexed(entity.items, location, match, "item", f"L{entity.index}")
-    if isinstance(entity, CodeBlock):
-        return _resolve_indexed(entity.lines, location, match, "line", f"C{entity.index}")
+    if isinstance(entity, ListBlock | CodeBlock):
+        return _resolve_indexed(entity, location, match)
     if isinstance(entity, Diagram):
         return Resolution("diagram", "\n".join(entity.lines))
     if isinstance(entity, Reference):

@@ -10,7 +10,21 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-_ENTITY_LETTERS = frozenset("PTLCQSDR")
+# Name and legal location shape per letter, spelled with the caller's own entity
+# so a hint reads back as an address they can paste. One table, so a new entity
+# cannot arrive with a letter but no way to say what goes inside it.
+_ENTITIES: dict[str, tuple[str, str]] = {
+    "P": ("paragraph", "{e}.2 for a sentence, or {e}.(/word/) to match inside it"),
+    "T": ("table", "{e}.3 for a row, {e}.3,2 for a cell, {e}.,2 for a column"),
+    "L": ("list", "{e}.2 for an item"),
+    "C": ("verbatim block", "{e}.5 for a line"),
+    "Q": ("quote", "{e}.P1 for a paragraph inside it"),
+    "S": ("section", "{e}.P1 for a paragraph inside it"),
+    "D": ("diagram", "{e} on its own — a diagram has no addressable parts"),
+    "R": ("reference", "{e} on its own — a definition has no addressable parts"),
+}
+
+_ENTITY_LETTERS = frozenset(_ENTITIES)
 _CONTAINER_LETTERS = frozenset("QS")
 _SINGLE_NUMBER_ENTITIES = frozenset("PLC")
 _NO_LOCATION_ENTITIES = frozenset("DR")  # a diagram and a ref def have no sub-units
@@ -33,12 +47,28 @@ MISSING = "MISSING"  # well-formed, and nothing is there
 AMBIGUOUS = "AMBIGUOUS"  # well-formed, and more than one thing is there
 
 
+def format_failure(kind: str, message: str, hint: str) -> str:
+    """One shape for every failure: the category, what happened, then what to type
+    instead. The hint is what turns a rejection into the next address."""
+    return f"{kind}: {message}\n  -> {hint}"
+
+
+def location_form(letter: str, index: int | None = None) -> str:
+    """How to address inside this entity, spelled with its own index."""
+    form = _ENTITIES[letter][1]
+    return form.format(e=f"{letter}{index if index is not None else 1}")
+
+
+def entity_menu() -> str:
+    return ", ".join(f"{letter} {name}" for letter, (name, _) in _ENTITIES.items())
+
+
 class RefError(Exception):
     """A malformed address. Always ``REJECTED`` — a static defect, caught without
-    ever seeing a message."""
+    ever seeing a message. ``hint`` is required, so none ships without a remedy."""
 
-    def __str__(self) -> str:
-        return f"{REJECTED}: {super().__str__()}"
+    def __init__(self, message: str, hint: str) -> None:
+        super().__init__(format_failure(REJECTED, message, hint))
 
 
 @dataclass(frozen=True)
@@ -100,47 +130,61 @@ def _parse_numeric_location(comp: str) -> Location:
     col_only = _COL_ONLY_RE.fullmatch(comp)
     if col_only:
         return TableLoc(None, int(col_only.group(1)))
-    raise RefError(f"malformed location {comp!r}")
+    raise RefError(
+        f"malformed location {comp!r}",
+        "a location is a number (3), a cell (3,2), or a column (,2)",
+    )
 
 
 def _check_location_legal(step: EntityStep, location: Location) -> None:
     letter = step.letter
+    inside = f"use {location_form(letter, step.index)}"
     if letter in _NO_LOCATION_ENTITIES:
-        raise RefError(f"{letter}{step.index} takes no location")
+        raise RefError(f"{letter}{step.index} takes no location", inside)
     if letter in _CONTAINER_LETTERS:
-        raise RefError(
-            f"{letter}{step.index} is a container; address an entity inside it, not a bare location"
-        )
+        raise RefError(f"{letter}{step.index} is a container, not a leaf", inside)
     if letter in _SINGLE_NUMBER_ENTITIES and isinstance(location, TableLoc):
-        raise RefError(f"{letter}{step.index} takes a single number, not a cell reference")
+        raise RefError(f"{letter}{step.index} takes a single number, not a cell", inside)
 
 
 def _check_match_legal(step: EntityStep, location: Location) -> None:
     letter = step.letter
+    inside = f"use {location_form(letter, step.index)}"
     if letter in _NO_LOCATION_ENTITIES:
-        raise RefError(f"{letter}{step.index} takes no match")
+        raise RefError(f"{letter}{step.index} takes no match", inside)
     if letter in _CONTAINER_LETTERS:
-        raise RefError(
-            f"{letter}{step.index} is a container; address an entity inside it, not a bare match"
-        )
+        raise RefError(f"{letter}{step.index} is a container, not a leaf", inside)
     if isinstance(location, TableLoc):
-        raise RefError("a content match cannot compose with a cell or column reference")
+        raise RefError(
+            "a match cannot compose with a cell or column reference",
+            "match a whole row instead, as in T1.(/word/)",
+        )
 
 
 def _check_selector_legal(step: EntityStep, location: Location, match: MatchLoc | None) -> None:
     """A step with no index needs the match and takes no location, having spent the
     match on choosing the entity. Both match forms are legal there."""
+    letter = step.letter
     if match is None:
-        raise RefError(f"entity {step.letter} needs an index")
+        raise RefError(
+            f"entity {letter} needs an index",
+            f"use {letter}1, or {letter}(/word/) to select it by content",
+        )
     if location is not None:
-        raise RefError(f"{step.letter}(/…/) selects an entity; it takes no location")
+        raise RefError(
+            f"{letter}(/…/) selects an entity; it takes no location",
+            f"drop the location: {letter}(/{match.text}/)",
+        )
 
 
 def _split_turn_section(s: str) -> tuple[int, int | None, str]:
     """Peel the mandatory ``N<n>`` and optional ``-S<n>`` off the front."""
     turn_match = _TURN_RE.match(s)
     if not turn_match:
-        raise RefError("missing turn number")
+        raise RefError(
+            "missing turn number",
+            f"every address starts with the turn it points into: N1-{s or 'S1.P1'}",
+        )
     turn = int(turn_match.group(1))
     body = s[turn_match.end() :]
 
@@ -151,9 +195,15 @@ def _split_turn_section(s: str) -> tuple[int, int | None, str]:
         body = body[section_match.end() :]
 
     if body.startswith("-"):
-        raise RefError("unexpected '-' (dash is only allowed between turn and section)")
+        raise RefError(
+            "unexpected '-' after the turn/section",
+            "the dash only separates turn from section, as in N1-S1.P1",
+        )
     if body and not body.startswith("."):
-        raise RefError(f"unexpected {body[0]!r} after the turn/section")
+        raise RefError(
+            f"unexpected {body[0]!r} after the turn/section",
+            "entities follow a dot, as in N1-S1.P1",
+        )
     return turn, section, body
 
 
@@ -164,7 +214,7 @@ def _peel_match_location(body: str) -> tuple[MatchLoc | None, str]:
         return None, body
     text = match_tail.group(2)
     if not text:
-        raise RefError("empty match string")
+        raise RefError("empty match string", "put a pattern between the slashes: (/word/)")
     return MatchLoc(text, every=match_tail.group(1) == "g"), body[: match_tail.start()]
 
 
@@ -175,24 +225,31 @@ def _parse_path(components: list[str]) -> tuple[tuple[EntityStep, ...], Location
         if comp[0].isalpha():
             entity_match = _ENTITY_RE.fullmatch(comp)
             if not entity_match:
-                raise RefError(f"malformed entity {comp!r}")
+                raise RefError(
+                    f"malformed entity {comp!r}",
+                    "an entity is a letter and a number (P1, T2), or a letter and a "
+                    "match (P(/word/))",
+                )
             letter = entity_match.group(1).upper()
             if letter not in _ENTITY_LETTERS:
-                raise RefError(f"unknown entity {letter!r}")
+                raise RefError(f"unknown entity {letter!r}", f"known entities: {entity_menu()}")
             index = entity_match.group(2)
             path.append(EntityStep(letter, int(index) if index else None))
         elif i != len(components) - 1:
-            raise RefError(f"location {comp!r} must be the final part of the address")
+            raise RefError(
+                f"location {comp!r} must be the final part of the address",
+                f"one location, at the end: put {comp!r} last or drop it",
+            )
         else:
             location = _parse_numeric_location(comp)
     return tuple(path), location
 
 
 def parse_ref(raw: str) -> Ref:
-    """Or raise :class:`RefError` naming the defect."""
+    """Or raise :class:`RefError` naming the defect and what to type instead."""
     s = _normalize_glyphs(raw).strip()
     if not s:
-        raise RefError("empty address")
+        raise RefError("empty address", "an address is at least a turn: N1")
 
     turn, section, body = _split_turn_section(s)
     match_location, body = _peel_match_location(body)
@@ -200,13 +257,22 @@ def parse_ref(raw: str) -> Ref:
     path, location = _parse_path(components)
     for step in path[:-1]:  # only the terminal step may be selected by a match
         if step.index is None:
-            raise RefError(f"entity {step.letter} needs an index")
+            raise RefError(
+                f"entity {step.letter} needs an index",
+                f"use {step.letter}1 — only the last entity may be selected by a match",
+            )
 
     if not path:
         if location is not None:
-            raise RefError("a location needs an entity to attach to")
+            raise RefError(
+                "a location needs an entity to attach to",
+                f"name the entity first, as in N{turn}-S1.P1.{_render(location)}",
+            )
         if match_location is not None:
-            raise RefError("a match needs an entity to attach to")
+            raise RefError(
+                "a match needs an entity to attach to",
+                f"name the entity first, as in N{turn}-S1.P1.(/{match_location.text}/)",
+            )
     elif path[-1].index is None:
         _check_selector_legal(path[-1], location, match_location)
     else:
@@ -218,3 +284,10 @@ def parse_ref(raw: str) -> Ref:
     return Ref(
         turn=turn, section=section, path=path, location=location, match=match_location, raw=raw
     )
+
+
+def _render(location: Location) -> str:
+    if isinstance(location, TableLoc):
+        row = "" if location.row is None else location.row
+        return f"{row},{location.col}"
+    return str(location)
