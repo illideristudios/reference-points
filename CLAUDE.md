@@ -1,0 +1,53 @@
+# Project: reference-points
+A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against markdown message content, resolving exactly or failing loudly.
+
+> This file is the project-specific overlay. Whatever global workflow rules your setup already applies still hold; nothing here depends on them.
+
+## Core Principles (project-specific)
+- **One decomposer, single source of truth.** `decompose()` both labels a message and provides the tree that `resolve()` walks. A label emitted by the renderer and the address the resolver computes are identical *by construction* — never maintain two code paths that could disagree.
+- **Fail loud, never guess.** Every parse/resolve failure raises a typed error naming the specific defect (missing turn, illegal location for entity, ambiguous match, out-of-range). Silent mis-resolution is the one bug this project exists to prevent.
+- **Pure functions.** `grammar`, `decompose`, `resolve`, `render` are side-effect-free and independently testable; only `__main__` does I/O.
+- **YAGNI.** Build for the grammar as specified. No speculative entity types or config knobs.
+
+## Stack
+- **Language**: Python 3.13 (`from __future__ import annotations` on every module)
+- **Package manager**: `uv` (uv.lock committed)
+- **Test framework**: `pytest` (+ `pytest-xdist`)
+- **Lint / format**: `ruff` (strict select-list)
+- **Type checker**: `pyright` (`typeCheckingMode = "strict"` on `src`)
+
+## Build & Test Commands
+- **Install**: `uv sync`
+- **Run CLI**: `uv run python -m reference_points <cmd> [args]`
+- **Unit tests**: `uv run pytest`
+- **Lint**: `uv run ruff check .`  · **Format**: `uv run ruff format .`
+- **Type-check**: `uv run pyright`
+
+## TDD — Project-specific Red → Green → Refactor commands
+- **Inner Red→Green loop** (scoped): `uv run pytest tests/test_<module>.py -x`
+- **Post-Refactor confidence check**: `uv run pytest -n auto`
+- **Pre-commit gate**: `uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest`
+
+### Testing — Hard Rules
+- New behavior MUST have a failing test first (watch it fail for the right reason).
+- The **round-trip invariant** is load-bearing: every address `render_inline` emits MUST resolve back to the exact block it labels. Keep a test enforcing it.
+- Match parser tests to the grammar table in the README — every valid form and every rejection form has a test.
+
+## Code Organization
+- **One module per concern** under `src/reference_points/`:
+  `grammar.py` (Ref dataclass + `parse_ref` + `RefError`), `decompose.py`
+  (`decompose` + `split_sentences`), `resolve.py`, `render.py`
+  (`render_inline` + `render_map`), `__main__.py` (CLI only).
+- One test module per source module: `tests/test_<module>.py`.
+- Dataclasses for AST nodes; `pathlib` for file I/O.
+
+## Documentation Checklist (Required with Every Code Change)
+1. **README.md** — repo root (always required; human-facing; grammar table stays in sync with `grammar.py`).
+2. **REFERENCE_POINTS.md** — the canonical spec; update when a grammar decision changes.
+
+## Project-Specific Gotchas
+- **`split_sentences` is a heuristic** — imperfection is acceptable *because* the same function runs at label-time and resolve-time, so labels and lookups stay self-consistent. Don't "fix" it toward linguistic correctness at the cost of determinism.
+- **The marker set is a `LabelStyle`, not a hard-coded string.** `ASCII` is the default (`N27-S1` / `.P1`); `GLYPH` (`◆27 §1` / `·P1`) is opt-in via `--glyphs`. Adding a style means adding a constant, not branching in the renderer. `parse_ref` accepts every style's output — `_normalize_glyphs` is what makes that true, so don't delete it.
+
+## Gitignore Must-Haves
+`.venv/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`, `dist/`, `*.egg-info/`, `_scratch/`.

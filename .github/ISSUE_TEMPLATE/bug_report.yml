@@ -1,0 +1,39 @@
+name: Bug report
+description: An address resolves wrong, a rejection is missing, or the CLI misbehaves.
+labels: ["bug"]
+body:
+  - type: input
+    id: address
+    attributes:
+      label: Address
+      description: The reference-point address involved, if any.
+      placeholder: N27-S1.T1.4,2
+    validations:
+      required: false
+  - type: textarea
+    id: input
+    attributes:
+      label: Input message
+      description: The markdown the address was resolved against. Paste it verbatim.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      description: What should have resolved, and what actually did. Include the exact error text for a rejection.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - CLI
+        - decompose
+        - grammar / parse_ref
+        - resolve
+        - render (label / map)
+    validations:
+      required: true

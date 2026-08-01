@@ -1,0 +1,154 @@
+"""Tests for resolving an address against a decomposed message."""
+
+from __future__ import annotations
+
+import pytest
+
+from reference_points.decompose import Message, decompose
+from reference_points.grammar import parse_ref
+from reference_points.resolve import ResolveError, resolve
+
+
+def test_resolves_a_paragraph_sentence(worked_msg: Message) -> None:
+    result = resolve(parse_ref("N27-S1.P1.2"), worked_msg)
+    assert result.content == "Here is the current breakdown."
+
+
+def test_out_of_range_sentence_fails_loudly(worked_msg: Message) -> None:
+    with pytest.raises(ResolveError, match="no such sentence 9"):
+        resolve(parse_ref("N27-S1.P1.9"), worked_msg)
+
+
+# --- tables --------------------------------------------------------------
+
+
+def test_resolves_a_table_row(worked_msg: Message) -> None:
+    assert resolve(parse_ref("N27-S1.T1.4"), worked_msg).content == "| Team | $40 | 20 |"
+
+
+def test_resolves_a_table_cell(worked_msg: Message) -> None:
+    assert resolve(parse_ref("N27-S1.T1.4,2"), worked_msg).content == "$40"
+
+
+def test_resolves_a_whole_column(worked_msg: Message) -> None:
+    assert resolve(parse_ref("N27-S1.T1.,2"), worked_msg).content == "Price\n$0\n$12\n$40"
+
+
+def test_resolves_a_row_by_unique_match(worked_msg: Message) -> None:
+    assert resolve(parse_ref("N27-S1.T1.(/Team/)"), worked_msg).content == "| Team | $40 | 20 |"
+
+
+def test_ambiguous_single_match_fails_loudly(worked_msg: Message) -> None:
+    # `$` is now an end-anchor under regex; the literal dollar is `\$`.
+    with pytest.raises(ResolveError, match="AMBIGUOUS: 3 matches"):
+        resolve(parse_ref(r"N27-S1.T1.(/\$/)"), worked_msg)
+
+
+def test_global_match_returns_every_row(worked_msg: Message) -> None:
+    content = resolve(parse_ref(r"N27-S1.T1.(g/\$/)"), worked_msg).content
+    assert content == "| Free | $0 | 1 |\n| Pro | $12 | 5 |\n| Team | $40 | 20 |"
+
+
+def test_no_match_fails_loudly(worked_msg: Message) -> None:
+    with pytest.raises(ResolveError, match="no match"):
+        resolve(parse_ref("N27-S1.T1.(/nonesuch/)"), worked_msg)
+
+
+def test_regex_metacharacter_matches(worked_msg: Message) -> None:
+    # `(/…/)` is a regex, so `.` is any-char: `F.ee` matches the "Free" row.
+    assert resolve(parse_ref("N27-S1.T1.(/F.ee/)"), worked_msg).content == "| Free | $0 | 1 |"
+
+
+def test_match_is_case_sensitive(worked_msg: Message) -> None:
+    # No implicit `i` flag: lowercase `free` does not match "Free".
+    with pytest.raises(ResolveError, match="no match"):
+        resolve(parse_ref("N27-S1.T1.(/free/)"), worked_msg)
+
+
+def test_inline_flag_enables_case_insensitivity(worked_msg: Message) -> None:
+    # Flags ride inside the pattern: `(?i:…)` makes `free` match "Free".
+    assert resolve(parse_ref("N27-S1.T1.(/(?i:free)/)"), worked_msg).content == "| Free | $0 | 1 |"
+
+
+def test_invalid_regex_fails_loudly(worked_msg: Message) -> None:
+    with pytest.raises(ResolveError, match="invalid regex"):
+        resolve(parse_ref("N27-S1.T1.(/[/)"), worked_msg)
+
+
+def test_location_and_match_compose_within_a_sentence(worked_msg: Message) -> None:
+    # Location narrows to sentence 2, then the regex matches *within* it.
+    assert (
+        resolve(parse_ref("N27-S1.P1.2(/current/)"), worked_msg).content
+        == "Here is the current breakdown."
+    )
+
+
+def test_composed_match_that_misses_the_located_scope_fails(worked_msg: Message) -> None:
+    # "tiers" lives in sentence 1, so scoping the regex to sentence 2 is a loud no-match.
+    with pytest.raises(ResolveError, match="no match"):
+        resolve(parse_ref("N27-S1.P1.2(/tiers/)"), worked_msg)
+
+
+def test_location_and_match_compose_within_a_table_row(worked_msg: Message) -> None:
+    assert resolve(parse_ref("N27-S1.T1.2(/Free/)"), worked_msg).content == "| Free | $0 | 1 |"
+
+
+def test_composed_match_that_misses_the_located_row_fails(worked_msg: Message) -> None:
+    with pytest.raises(ResolveError, match="no match"):
+        resolve(parse_ref("N27-S1.T1.2(/Team/)"), worked_msg)
+
+
+def test_out_of_range_row_fails_loudly(worked_msg: Message) -> None:
+    with pytest.raises(ResolveError, match="no such row 9"):
+        resolve(parse_ref("N27-S1.T1.9"), worked_msg)
+
+
+# --- paragraphs & sections ----------------------------------------------
+
+
+def test_resolves_second_paragraph_first_sentence(worked_msg: Message) -> None:
+    result = resolve(parse_ref("N27-S1.P2.1"), worked_msg)
+    assert result.content == "Enterprise pricing is negotiated separately."
+
+
+def test_whole_paragraph_with_no_location(worked_msg: Message) -> None:
+    result = resolve(parse_ref("N27-S1.P1"), worked_msg)
+    assert result.content == (
+        "The pricing tiers changed last quarter. Here is the current breakdown."
+    )
+
+
+# --- missing targets -----------------------------------------------------
+
+
+def test_missing_section_fails_loudly(worked_msg: Message) -> None:
+    with pytest.raises(ResolveError, match="no section 5"):
+        resolve(parse_ref("N27-S5.P1"), worked_msg)
+
+
+def test_missing_entity_fails_loudly(worked_msg: Message) -> None:
+    with pytest.raises(ResolveError, match="no T2 here"):
+        resolve(parse_ref("N27-S1.T2"), worked_msg)
+
+
+def test_descending_into_a_leaf_fails_loudly(worked_msg: Message) -> None:
+    with pytest.raises(ResolveError, match="not a container"):
+        resolve(parse_ref("N27-S1.P1.T1"), worked_msg)
+
+
+# --- code, lists, blockquotes -------------------------------------------
+
+
+def test_resolves_a_code_line() -> None:
+    msg = decompose("```python\na = 1\nb = 2\nc = 3\n```\n")
+    assert resolve(parse_ref("N1-S1.C1.2"), msg).content == "b = 2"
+
+
+def test_resolves_a_list_item() -> None:
+    msg = decompose("- alpha\n- beta\n- gamma\n")
+    assert resolve(parse_ref("N1-S1.L1.3"), msg).content == "gamma"
+
+
+def test_resolves_a_sentence_nested_in_a_blockquote() -> None:
+    msg = decompose("> The claim stands. It is supported.\n")
+    assert resolve(parse_ref("N1-S1.Q1.P1.2"), msg).content == "It is supported."
