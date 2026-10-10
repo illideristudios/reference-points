@@ -6,7 +6,7 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
 ## Core Principles (project-specific)
 - **One decomposer, single source of truth.** `decompose()` both labels a message and provides the tree that `resolve()` walks. A label emitted by the renderer and the address the resolver computes are identical *by construction* — never maintain two code paths that could disagree.
 - **Fail loud, never guess.** Every parse/resolve failure raises a typed error naming the specific defect, prefixed with its category — `REJECTED:` / `INVALID:` / `MISSING:` / `AMBIGUOUS:` (the constants live in `grammar.py`). `RefError` prefixes itself; `ResolveError` takes the category as a required constructor argument, so a new message cannot ship uncategorized. Each also carries a `hint` — the address to type instead — likewise required, so the type checker catches an omission rather than a reviewer; where the engine knows the answer (what is in scope, how many rows) the hint gives it rather than generic advice. `test_every_failure_names_its_category` and `test_every_failure_says_what_to_type_instead` hold the line. Silent mis-resolution is the one bug this project exists to prevent.
-- **Pure functions.** `grammar`, `decompose`, `resolve`, `render` are side-effect-free and independently testable; only `__main__` does I/O.
+- **Pure functions.** `grammar`, `decompose`, `resolve`, `render` are side-effect-free and independently testable; only `__main__` and `serve.py` do I/O.
 - **YAGNI.** Build for the grammar as specified. No speculative entity types or config knobs.
 
 ## Stack
@@ -22,6 +22,7 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
 - **Unit tests**: `uv run pytest`
 - **Lint**: `uv run ruff check .`  · **Format**: `uv run ruff format .`
 - **Type-check**: `uv run pyright`
+- **Mod**: `claude plugin validate .` · `claude plugin test`
 
 ## TDD — Project-specific Red → Green → Refactor commands
 - **Inner Red→Green loop** (scoped): `uv run pytest tests/test_<module>.py -x`
@@ -36,11 +37,12 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
 ## Code Organization
 - **One module per concern** under `src/reference_points/`:
   `grammar.py` (Ref dataclass + `parse_ref` + `RefError`), `decompose.py`
-  (`decompose` + `split_sentences`), `transcript.py` (the `Turn`/`Prompt`
+  (`decompose` + `split_sentences`), `transcript.py` (the `Turn`/`Block`/`Prompt`
   container, format-agnostic), `claude_code.py` (the one session reader),
-  `resolve.py`, `render.py` (`render_inline` + `render_map` + the viewer),
-  `__main__.py` (CLI only).
+  `resolve.py`, `render.py` (`render_inline` + `render_blocks` + `render_map` +
+  the viewer), `serve.py` (the CLI behind a Unix socket, for the mod), `__main__.py` (CLI only).
 - One test module per source module: `tests/test_<module>.py`.
+- **`hooks/` is the mod, and it holds no grammar.** `register.js` only moves text between Claude Code and the CLI (`expand`, `label --block`); a second copy of the address pattern in JS is how a label and its address come apart. Its tests are `hooks/register.test.ts`, run by `claude plugin test` from the repo root. Nothing the mod learns may live in a module variable: a hot reload re-runs the module but not `classic.SessionStart`, so a variable is silently gone and every hook falls back to native drawing. The transcript path is in `$.store`, keyed by session id. The mod reaches the engine over `serve.py`'s socket when one answers and otherwise runs the CLI, which gives the same answer; the server runs the CLI's own `main` (`run_captured`) and refuses once any file in `src/reference_points/` has changed, so keep it that thin, with no second implementation behind the socket.
 - Dataclasses for AST nodes; `pathlib` for file I/O.
 - **The repo root *is* the Claude Code plugin** — `.claude-plugin/` holds both
   `marketplace.json` (`"source": "./"`) and `plugin.json`, with `bin/` and
@@ -66,5 +68,5 @@ A citation grammar engine — parse/resolve `<N>-<S>.<E>.<L>` addresses against 
 
 ## Gitignore Must-Haves
 `.venv/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`, `dist/`, `*.egg-info/`, `_scratch/`,
-`.claude/` (per-machine session state — **not** `.claude-plugin/`, which is the
+`/tsconfig.json` (generated beside the ignored `types/`), `.claude/` (per-machine session state — **not** `.claude-plugin/`, which is the
 tracked marketplace manifest).

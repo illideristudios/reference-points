@@ -24,6 +24,14 @@ S=$(reference-points-session)      # this conversation's transcript
 Both commands are on `PATH` once the plugin is installed. `reference-points`
 prints results to stdout and failures to stderr with a non-zero exit.
 
+## When the mod is loaded
+
+The plugin also ships a Claude Code mod that does this work in code. It is loaded when the first prompt of a conversation carries a line beginning `[reference-points mod active]`.
+
+With the mod loaded, do not write `N<turn>-S<n>` labels in your replies, because the viewer draws them and a second set would double them. An address in a prompt arrives already resolved, in a block headed `[N27-S1.P2]` after the prompt: quote that block and do not run `resolve` for it. A prompt holding a bad address never reaches you, because the mod refuses it with the engine's message.
+
+Everything below still applies without that line, and for any address that did not arrive resolved.
+
 ## Someone hands you an address
 
 ```bash

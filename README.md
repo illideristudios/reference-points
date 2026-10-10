@@ -87,6 +87,18 @@ It is a skill and not an MCP server on purpose: both commands are stateless text
 in, text out, which the existing Bash tool already covers. A server would add a
 process and a protocol to carry two `argv` arrays.
 
+### As a mod
+
+The plugin also ships a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) in `hooks/`, on by default from Claude Code 2.1.287. It moves the work the skill asks of the model into code, so it costs the model no tokens.
+
+- **Labels are drawn, not written.** Each reply block is redrawn with its labels as links, and the stored reply never contains them. The model is told once per conversation not to write its own.
+- **A click inserts the address.** A plain click on a label puts its full address, such as `N27-S1.P2`, in the prompt box at the cursor. Ctrl, alt and cmd clicks are not the mod's to answer, so they keep the default link behaviour, and the link target is a reserved `.invalid` host that goes nowhere.
+- **Addresses in a prompt are resolved on submit.** Each one arrives with its content attached. A bad one is refused with the engine's category and the address to type instead.
+
+- **A call costs a request, not a Python start.** The first call the mod makes runs the CLI itself and starts `reference-points serve --daemon`, which keeps the engine running behind a Unix socket (mode 600, in a mode-700 directory under your temp dir). Later calls go over it in about 10 ms instead of about 100 ms. It is the same `main` behind the socket, so there is no second code path, and it is optional: with no server the mod falls back to the CLI. The server refuses a request once the engine's source has changed on disk, so an update never gets an answer from old code, and it stops after 30 idle minutes.
+
+Clicks are reported only in the fullscreen terminal. The mod is JavaScript but holds no grammar: it calls `reference-points expand` and `reference-points label --block <uuid>`, so the engine stays the one decomposer. Turn the mod off in `/plugin`, or per session with `--safe-mode`, and the skill takes over.
+
 ## The grammar
 
 An address is `<N>-<S>.<E>.<L>` — **turN · Section · Entity · Location**.
@@ -150,6 +162,10 @@ Pass `--glyphs` for the monochrome set instead:
 |-------|----------------|-------|
 | ASCII (default) | `## N27-S1 Costs` | `.P1` |
 | `--glyphs` | `## ◆27 §1 Costs` | `·P1` |
+
+The mod draws a third form, `LINKED`: the ASCII text with each label a markdown link to its **full** address, so `.P1` under section 2 links to `N27-S2.P1`. The printed fragment is still ambiguous across sections, and the link is not.
+
+A table's label line also lists its size and a link for every row and column, such as `.T1 · 4 rows × 3 cols · rows [1] [2] [3] [4] · cols [1] [2] [3]`, so the table forms (`T1.3`, `T1.,2`) are discoverable by clicking. The line sits above the table, which renders unchanged, and a table past 20 rows lists the first 20. For a single cell, edit a row address to `T1.3,2`.
 
 The choice is display-only: `parse_ref` accepts **both** forms, so a label
 resolves in whichever style emitted it.
@@ -232,6 +248,7 @@ uv run pytest            # tests
 uv run ruff check .      # lint
 uv run ruff format .     # format
 uv run pyright           # typecheck (strict on src)
+claude plugin test       # the mod's tests (hooks/register.test.ts)
 ```
 
 CI runs those same four commands on every push and pull request.
@@ -240,7 +257,7 @@ that hold the engine together, and what a grammar change has to carry.
 Participation is governed by [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
 Layout: `src/reference_points/` (`grammar` · `decompose` · `resolve` · `render`
-· `__main__`), one test module per source module under `tests/`. Built with the
+· `__main__`), `hooks/` (the mod), one test module per source module under `tests/`. Built with the
 `uv` toolchain; `uv.lock` is committed. Block structure comes from
 [`markdown-it-py`](https://github.com/executablebooks/markdown-it-py) —
 `decompose` maps its token stream onto the entity alphabet rather than scanning

@@ -243,6 +243,8 @@ Two tiers, independent of the marker set:
 
 Full paths are for *references*; fragments are for *labels*.
 
+A viewer that can act on a click renders the labels as links (`LINKED`). The link text is still the fragment, and the href is always the canonical ASCII **full** address, whatever marker set is shown. This is display only: the grammar is unchanged, and the href resolves to the block it labels because it is built from the same tree as the label.
+
 ### A labeled message must still render as markdown
 
 Labels are added to the source; they must never change what it renders to. Two
