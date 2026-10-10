@@ -35,6 +35,19 @@ _BARE_SECTION_RE = re.compile(r"^-?S\d+")
 # The index is optional — a step may be selected by the trailing match instead.
 _ENTITY_RE = re.compile(r"([A-Za-z])(\d*)$")
 _MATCH_TAIL_RE = re.compile(r"\.?\((g?)/(.*)/\)$")
+# What makes a token in prose an address rather than "N2 gas": a turn that goes
+# on into a section or an entity, read by the grammar's own shape so that whatever
+# a writer wraps around it (backticks, bold, quotes, a full stop) is left outside.
+# An entity is a letter with a number, or a lone letter that is not the start of a
+# word, so a filename like "N1.md" is not an address. The glyph style prints its
+# separators with a space ("\u25c627 \u00a71 \u00b7P2"); a trailing match may hold spaces.
+_STEP = r"(?:\.| ?\u00b7)(?:[A-Za-z]\d+|[A-Za-z](?![A-Za-z\d]))"
+_ADDRESS_IN_TEXT_RE = re.compile(
+    r"(?<![\w.\-])[N\u25c6]\d+"
+    rf"(?:(?:-S\d+| ?\u00a7\d+)(?:{_STEP})*|(?:{_STEP})+)"
+    r"(?:\.\d+(?:,\d+)?|\.,\d+)?"
+    r"(?:\.?\(g?/[^\n]*?/\))?"
+)
 _ROW_COL_RE = re.compile(r"(\d+),(\d+)$")
 _COL_ONLY_RE = re.compile(r",(\d+)$")
 
@@ -316,6 +329,17 @@ def parse_ref(raw: str, turn: int | None = None) -> Ref:
         match=match_location,
         raw=raw,
     )
+
+
+def find_refs(text: str) -> tuple[Ref, ...]:
+    """Every full address written in free text, each once, in order of appearance.
+
+    A token of address shape that fails :func:`parse_ref` raises its
+    :class:`RefError` rather than being skipped: a typo'd citation must not
+    quietly become a prompt with nothing resolved.
+    """
+    raws = dict.fromkeys(found.group() for found in _ADDRESS_IN_TEXT_RE.finditer(text))
+    return tuple(parse_ref(raw) for raw in raws)
 
 
 def _render(location: Location) -> str:

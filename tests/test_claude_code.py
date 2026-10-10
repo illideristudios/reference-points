@@ -212,3 +212,43 @@ def test_a_prompt_is_never_decomposed(transcript_jsonl: str) -> None:
     assert isinstance(entry, Prompt)
     assert not hasattr(entry, "message")
     assert not isinstance(entry, Turn)
+
+
+# --- blocks: which record each part of a reply came from ------------------
+
+
+def _record(role: str, uuid: str, text: str) -> str:
+    return _line(
+        type=role, uuid=uuid, message={"role": role, "content": [{"type": "text", "text": text}]}
+    )
+
+
+def _tool_result() -> str:
+    content = [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]
+    return _line(type="user", uuid="tool", message={"role": "user", "content": content})
+
+
+def test_a_reply_remembers_which_record_each_block_came_from() -> None:
+    # The mod is handed a record's uuid and nothing else; this is how the engine
+    # turns it back into a place in the reply.
+    jsonl = "\n".join([
+        _record("user", "q", "question"),
+        _record("assistant", "u1", "First line.\n\nSecond."),
+        _tool_result(),
+        _record("assistant", "u2", "After the tool."),
+    ])
+    (turn,) = claude_code.parse(jsonl).turns
+    assert [(b.uuid, b.line) for b in turn.blocks] == [("u1", 0), ("u2", 4)]
+    assert turn.message.source.split("\n")[4] == "After the tool."
+
+
+def test_blocks_belong_to_their_own_turn() -> None:
+    jsonl = "\n".join([
+        _record("user", "q1", "one"),
+        _record("assistant", "a1", "Reply one."),
+        _record("user", "q2", "two"),
+        _record("assistant", "a2", "Reply two."),
+    ])
+    first, second = claude_code.parse(jsonl).turns
+    assert [b.uuid for b in first.blocks] == ["a1"]
+    assert [b.uuid for b in second.blocks] == ["a2"]

@@ -12,7 +12,10 @@ from reference_points.decompose import Entity, Message, Quote, Section, decompos
 from reference_points.grammar import AMBIGUOUS, parse_ref
 from reference_points.render import (
     GLYPH,
+    LINK_BASE,
+    LINKED,
     quote_prompt,
+    render_blocks,
     render_inline,
     render_map,
     render_transcript,
@@ -424,3 +427,133 @@ def test_every_address_the_viewer_prints_resolves_across_the_conversation(
                 assert got.content == resolve_entity(entity, None, None).content, address
                 checked += 1
     assert checked > 5, f"the walk covered only {checked} entities"
+
+
+# --- per-block labels and linked addresses --------------------------------
+
+BLOCKS = ["# Plan\n\nFirst para.", "- a\n- b\n\nSecond para.", "Tail para."]
+
+
+def _joined(blocks: list[str], turn: int = 7) -> tuple[Message, list[int]]:
+    starts: list[int] = []
+    line = 0
+    for block in blocks:
+        starts.append(line)
+        line += block.count("\n") + 2
+    return decompose("\n\n".join(blocks), turn=turn), starts
+
+
+def test_blocks_are_the_whole_turns_labels_cut_at_the_block_boundaries() -> None:
+    msg, starts = _joined(BLOCKS)
+    labeled = render_blocks(msg, starts)
+    assert len(labeled) == len(BLOCKS)
+    assert "\n\n".join(labeled) == render_inline(msg)
+
+
+def test_a_block_carries_only_its_own_labels() -> None:
+    msg, starts = _joined(BLOCKS)
+    plan, middle, tail = render_blocks(msg, starts)
+    assert plan.startswith("# N7-S1 Plan") and ".P1 First para." in plan
+    assert middle.startswith(".L1\n- a") and ".P2 Second para." in middle
+    assert tail == ".P3 Tail para."
+
+
+def test_the_default_styles_stay_plain_text() -> None:
+    msg, _ = _joined(BLOCKS)
+    assert "](" not in render_inline(msg)
+    assert "](" not in render_inline(msg, GLYPH)
+
+
+_LINKED_LABEL_RE = re.compile(
+    r"^(?:#{1,6} )?\[(?P<label>[^\]]+)\]\((?P<href>[^)]+)\)(?: (?P<rest>.*))?$"
+)
+
+
+def _linked_labels(rendered: str) -> list[tuple[str, str, str]]:
+    found: list[tuple[str, str, str]] = []
+    fenced = False
+    for line in rendered.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        match = None if fenced else _LINKED_LABEL_RE.match(line)
+        if match:
+            found.append((match["label"], match["href"], (match["rest"] or "").strip()))
+    return found
+
+
+def test_every_linked_address_resolves_to_the_block_it_labels(torture_msg: Message) -> None:
+    # The printed `.P1` is ambiguous on its own; the href is not. Read off the
+    # output, as the plain-label invariant above does, and compare content: a
+    # link that resolved to a *different* paragraph would raise nothing.
+    labels = _linked_labels(render_inline(torture_msg, LINKED))
+    assert len(labels) > 20, f"only {len(labels)} linked labels found — the scan is broken"
+    paragraphs = 0
+    for label, href, rest in labels:
+        assert href.startswith(LINK_BASE), href
+        address = href.removeprefix(LINK_BASE)
+        got = resolve(parse_ref(address), torture_msg)
+        if label.startswith(".P"):
+            assert got.content.startswith(rest), (
+                f"{address} labels {rest!r}, got {got.content[:60]!r}"
+            )
+            paragraphs += 1
+    assert paragraphs > 5
+
+
+def test_linking_preserves_the_block_skeleton(torture_md: str, torture_msg: Message) -> None:
+    source = _skeleton(torture_md)
+    labeled = _skeleton(render_inline(torture_msg, LINKED))
+    drift = [(i, a, b) for i, (a, b) in enumerate(zip_longest(source, labeled)) if a != b]
+    assert not drift, f"the linked copy renders differently: {drift}"
+
+
+def test_the_link_text_is_the_style_and_the_href_is_always_ascii() -> None:
+    msg = decompose("para one.\n", turn=3)
+    assert "[N3-S1](" in render_inline(msg, LINKED)
+    assert f"[.P1]({LINK_BASE}N3-S1.P1) para one." in render_inline(msg, LINKED)
+
+
+# --- tables: the label line says how to address a row, a column --------------
+
+
+def test_a_linked_table_label_offers_every_row_and_column(worked_msg: Message) -> None:
+    label = next(
+        line for line in render_inline(worked_msg, LINKED).splitlines() if line.startswith("[.T1]")
+    )
+    link = LINK_BASE + "N27-S1.T1"
+    assert label == (
+        f"[.T1]({link}) \u00b7 4 rows \u00d7 3 cols"
+        f" \u00b7 rows [1]({link}.1) [2]({link}.2) [3]({link}.3) [4]({link}.4)"
+        f" \u00b7 cols [1]({link}.,1) [2]({link}.,2) [3]({link}.,3)"
+    )
+
+
+def test_the_plain_styles_do_not_grow_a_table_hint(worked_msg: Message) -> None:
+    assert ".T1\n|" in render_inline(worked_msg)
+    assert ".T1\n|" in render_inline(worked_msg, GLYPH).replace("\u00b7T1", ".T1")
+
+
+def test_every_row_and_column_link_resolves_to_what_it_says(torture_msg: Message) -> None:
+    rendered = render_inline(torture_msg, LINKED)
+    checked = 0
+    for line in rendered.splitlines():
+        if not line.startswith("[.T"):
+            continue
+        for href in re.findall(r"\]\(([^)]+)\)", line):
+            address = href.removeprefix(LINK_BASE)
+            got = resolve(parse_ref(address), torture_msg)
+            assert got.content, address
+            checked += 1
+    assert checked > 3
+
+
+def test_a_long_table_offers_the_first_rows_and_says_so() -> None:
+    body = "\n".join(f"| r{i} | x |" for i in range(40))
+    msg = decompose(f"| h | h |\n|---|---|\n{body}\n", turn=2)
+    label = next(
+        line for line in render_inline(msg, LINKED).splitlines() if line.startswith("[.T1]")
+    )
+    assert "41 rows" in label
+    assert "[20](" in label and "[21](" not in label
+    assert "\u2026" in label

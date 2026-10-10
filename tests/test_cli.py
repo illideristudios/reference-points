@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from reference_points.__main__ import main
+from reference_points.__main__ import main, run_captured
 
 if TYPE_CHECKING:
     import pytest
@@ -100,3 +102,101 @@ def test_an_unreadable_file_is_its_own_category(capsys: pytest.CaptureFixture[st
     code = main(["resolve", "N1-S1.P1", "/nonexistent/message.md"])
     assert code == 1
     assert capsys.readouterr().err.startswith("UNREADABLE: ")
+
+
+def test_expand_resolves_every_address_in_the_text(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("what did N1-S1.P2 mean?"))
+    code = main(["expand", str(TRANSCRIPT)])
+    assert code == 0
+    assert capsys.readouterr().out == "[N1-S1.P2]\nThe second half of the reply.\n"
+
+
+def test_expand_prints_nothing_when_the_text_holds_no_address(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("no citations here, just N2 gas"))
+    assert main(["expand", str(TRANSCRIPT)]) == 0
+    assert not capsys.readouterr().out
+
+
+def test_expand_fails_loud_on_an_address_that_does_not_resolve(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("and N1-S1.P9?"))
+    assert main(["expand", str(TRANSCRIPT)]) == 1
+    assert capsys.readouterr().err.startswith("MISSING:")
+
+
+def _blocks_transcript(tmp_path: Path) -> Path:
+    def record(role: str, uuid: str, text: str) -> str:
+        message = {"role": role, "content": [{"type": "text", "text": text}]}
+        return json.dumps({"type": role, "uuid": uuid, "message": message})
+
+    path = tmp_path / "t.jsonl"
+    path.write_text(
+        "\n".join([
+            record("user", "q", "question"),
+            record("assistant", "u1", "First para."),
+            record("assistant", "u2", "Second para."),
+        ])
+    )
+    return path
+
+
+def test_label_block_labels_one_block_of_its_turn(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main(["label", str(_blocks_transcript(tmp_path)), "-T", "--block", "u2"])
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["text"] == f"[.P2]({out['base']}N1-S1.P2) Second para."
+
+
+def test_label_block_fails_loud_on_a_uuid_the_transcript_does_not_hold(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["label", str(_blocks_transcript(tmp_path)), "-T", "--block", "nope"]) == 1
+    assert capsys.readouterr().err.startswith("MISSING:")
+
+
+def test_label_block_needs_a_transcript(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = tmp_path / "m.md"
+    path.write_text("Hello.")
+    assert main(["label", str(path), "--block", "u1"]) == 1
+    assert "REJECTED:" in capsys.readouterr().err
+
+
+def test_label_block_refuses_a_marker_style_it_would_ignore(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "t.jsonl"
+    path.write_text("")
+    assert main(["label", str(path), "-T", "--block", "u1", "--glyphs"]) == 1
+    assert "REJECTED:" in capsys.readouterr().err
+
+
+def test_run_captured_gives_a_request_the_cli_exit_code_and_both_streams() -> None:
+    assert run_captured(["parse", "N1-S1.P1"], "")[0] == 0
+    code, out, err = run_captured(["parse", "N1-S1.Q"], "")
+    assert (code, out) == (1, "")
+    assert err.startswith("REJECTED:")
+
+
+def test_run_captured_feeds_the_request_text_to_expand_as_stdin() -> None:
+    code, out, _ = run_captured(["expand", str(TRANSCRIPT)], "what did N1-S1.P2 mean?")
+    assert code == 0
+    assert out == "[N1-S1.P2]\nThe second half of the reply.\n"
+
+
+def test_run_captured_turns_a_usage_error_into_a_result_not_an_exit() -> None:
+    code, _, err = run_captured(["no-such-command"], "")
+    assert code == 2
+    assert "invalid choice" in err
+
+
+def test_a_request_cannot_start_another_server() -> None:
+    code, _, err = run_captured(["serve"], "")
+    assert code == 1
+    assert err.startswith("REJECTED:")

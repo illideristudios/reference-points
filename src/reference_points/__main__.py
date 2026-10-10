@@ -8,6 +8,11 @@ Commands (results → stdout, errors → stderr + non-zero exit):
     map <file>               print the compact address→excerpt overlay
     resolve <ref> <file>     print the content the address points at
     turns <file>             count the replies a transcript holds
+    expand <transcript>      resolve every address written in the text on stdin
+    label <transcript> -T --block <uuid>
+                             one record's text, labeled and linked, as JSON
+    serve [--daemon]         answer the commands above over a Unix socket (the mod's
+                             way in without paying a Python start per call)
 
 ``--transcript`` / ``-T`` makes ``<file>`` a whole conversation instead of a
 single message. Then the address carries its own turn and ``--turn`` is not
@@ -24,15 +29,28 @@ rejected instead of answered. ``<file>`` may be ``-`` to read from stdin.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
+import json
 import sys
 from pathlib import Path
 
-from reference_points import claude_code
+from reference_points import claude_code, serve
 from reference_points.decompose import Entity, Message, Quote, Section, decompose
-from reference_points.grammar import RefError, parse_ref
+from reference_points.grammar import (
+    MISSING,
+    REJECTED,
+    RefError,
+    find_refs,
+    format_failure,
+    parse_ref,
+)
 from reference_points.render import (
     ASCII,
     GLYPH,
+    LINK_BASE,
+    LINKED,
+    render_blocks,
     render_inline,
     render_map,
     render_transcript,
@@ -106,6 +124,13 @@ def _build_parser() -> argparse.ArgumentParser:
             action="store_true",
             help="draw labels with ◆ turn / § section / · entity instead of ASCII",
         )
+        if name == "label":
+            p.add_argument(
+                "--block",
+                metavar="UUID",
+                help="with -T: only the transcript record with this uuid, labeled as a "
+                "part of its turn, every label a link to its full address (JSON out)",
+            )
 
     p_resolve = sub.add_parser("resolve", help="resolve an address to content")
     p_resolve.add_argument("ref")
@@ -115,6 +140,14 @@ def _build_parser() -> argparse.ArgumentParser:
     # count is what a caller needs to write the *next* turn's labels.
     p_turns = sub.add_parser("turns", help="count the replies a transcript holds")
     p_turns.add_argument("file")
+
+    # The text is stdin because it is a prompt, which may be any length and holds
+    # anything; the transcript is the argument because it is what addresses resolve in.
+    p_expand = sub.add_parser("expand", help="resolve every address written in stdin")
+    p_expand.add_argument("file", help="the transcript the addresses point into")
+
+    p_serve = sub.add_parser("serve", help="answer these commands over a Unix socket")
+    p_serve.add_argument("--daemon", action="store_true", help="detach once listening")
 
     return parser
 
@@ -128,13 +161,98 @@ def _message(args: argparse.Namespace) -> Message:
     return decompose(text, turn=args.turn if args.turn is not None else 1)
 
 
-def _dispatch(args: argparse.Namespace) -> int:
+def _expand(transcript_file: str) -> int:
+    transcript = claude_code.parse(_read(transcript_file))
+    # Resolve all before printing any: a prompt with one bad address gets the
+    # error alone, not a half-expanded context to mistake for the whole answer.
+    found = [(ref, resolve_in(ref, transcript).content) for ref in find_refs(sys.stdin.read())]
+    if found:
+        print("\n\n".join(f"[{ref.raw}]\n{content}" for ref, content in found))
+    return 0
+
+
+def _sourceless(args: argparse.Namespace) -> int | None:
+    """The commands that take no message source, or None for one that does."""
     if args.cmd == "parse":
         print(parse_ref(args.ref, turn=args.turn))
         return 0
     if args.cmd == "turns":
         print(len(claude_code.parse(_read(args.file)).turns))
         return 0
+    if args.cmd == "expand":
+        return _expand(args.file)
+    if args.cmd == "serve":
+        return _serve(daemon=args.daemon)
+    if args.cmd == "label" and args.block:
+        if not args.transcript or args.glyphs:
+            raise ResolveError(
+                REJECTED,
+                "--block labels one transcript record, always in the viewer's link style",
+                "label <transcript> -T --block <uuid>, without --glyphs",
+            )
+        return _block(args.file, args.block)
+    return None
+
+
+def _code_version() -> int:
+    """Changes when any engine source file does, which is how a running server
+    notices that it is no longer the engine on disk."""
+    return max(path.stat().st_mtime_ns for path in Path(__file__).parent.glob("*.py"))
+
+
+def _serve(*, daemon: bool) -> int:
+    path = serve.socket_path(Path(__file__).resolve().parents[2])
+    if not daemon:
+        print(path, flush=True)  # a foreground server never returns to print it
+    serve.serve(path, run_captured, _code_version, daemon=daemon)
+    if daemon:
+        print(path)
+    return 0
+
+
+def run_captured(argv: list[str], stdin: str) -> tuple[int, str, str]:
+    """``main`` for a caller that is not a process: its exit code and both streams.
+
+    Swaps process-wide streams, so callers must not overlap (the server does not).
+    """
+    if argv[:1] == ["serve"]:
+        failure = format_failure(
+            REJECTED, "a request cannot start another server", "run serve from a shell"
+        )
+        return 1, "", failure + "\n"
+    out, err = io.StringIO(), io.StringIO()
+    real_stdin = sys.stdin
+    sys.stdin = io.StringIO(stdin)
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = main(argv)
+            except SystemExit as exc:  # argparse reports a usage error by exiting
+                code = exc.code if isinstance(exc.code, int) else 1
+    finally:
+        sys.stdin = real_stdin
+    return code, out.getvalue(), err.getvalue()
+
+
+def _block(transcript_file: str, uuid: str) -> int:
+    """One record of a reply, labeled as the part of its turn that it is."""
+    for turn in claude_code.parse(_read(transcript_file)).turns:
+        for index, block in enumerate(turn.blocks):
+            if block.uuid == uuid:
+                text = render_blocks(turn.message, [b.line for b in turn.blocks], LINKED)[index]
+                print(json.dumps({"text": text, "base": LINK_BASE}))
+                return 0
+    raise ResolveError(
+        MISSING,
+        f"no reply record {uuid!r} in this transcript",
+        "a record not yet written, or not a reply, has no address: draw it unlabeled",
+    )
+
+
+def _dispatch(args: argparse.Namespace) -> int:
+    done = _sourceless(args)
+    if done is not None:
+        return done
 
     whole_transcript = args.transcript and args.turn is None
     style = GLYPH if getattr(args, "glyphs", False) else ASCII

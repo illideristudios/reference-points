@@ -17,10 +17,24 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class Block:
+    """One stretch of a reply that arrived as its own record. ``line`` is where it
+    starts in ``Turn.message.source``, which is the blocks joined by a blank line.
+
+    A viewer that draws a reply a piece at a time knows only the piece's ``uuid``;
+    this is what turns it back into a place in the reply.
+    """
+
+    uuid: str
+    line: int
+
+
+@dataclass(frozen=True)
 class Turn:
     """An assistant reply. ``message.turn`` is the ``N`` an address names."""
 
     message: Message
+    blocks: tuple[Block, ...] = ()
 
 
 @dataclass(frozen=True)

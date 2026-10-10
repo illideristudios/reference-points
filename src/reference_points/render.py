@@ -4,13 +4,19 @@
 exact formatting; ``render_map`` is a compact address→excerpt overlay instead. A
 section header carries the full prefix and every other entity only its fragment —
 full paths are for references, fragments for labels. Both styles parse.
+
+``LINKED`` makes every label a markdown link whose href is the *full* address, so
+a viewer that can act on a click needs no grammar of its own: what it was handed
+is already the address to resolve.
 """
 
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from reference_points.decompose import (
     CodeBlock,
@@ -25,6 +31,9 @@ from reference_points.decompose import (
     Table,
 )
 from reference_points.transcript import Transcript, Turn
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _MAP_EXCERPT = 60
 
@@ -41,10 +50,22 @@ class LabelStyle:
     section: str
     joiner: str
     entity: str
+    link: str | None = None  # base URL; set, every label is a link to its full address
 
 
 ASCII = LabelStyle(turn="N", section="S", joiner="-", entity=".")
 GLYPH = LabelStyle(turn="◆", section="§", joiner=" ", entity="·")
+
+# `.invalid` is reserved (RFC 2606): a click the viewer does not answer, such as a
+# ctrl-click that opens the link, goes nowhere instead of to somebody's server.
+LINK_BASE = "http://reference-points.invalid/"
+LINKED = replace(ASCII, link=LINK_BASE)
+
+
+def _tag(style: LabelStyle, text: str, address: str) -> str:
+    """The label as printed. ``address`` is the canonical ASCII form whatever the
+    style, because it is for the resolver and the style is for the reader."""
+    return text if style.link is None else f"[{text}]({style.link}{address})"
 
 
 def _entity_letter(entity: Entity) -> str:
@@ -109,21 +130,48 @@ def _label_heading(section: Section, label: str, plan: _LabelPlan) -> None:
         plan.prefix[section.line] = label
 
 
-def _label_entity(entity: Entity, style: LabelStyle, plan: _LabelPlan) -> None:
+def _label_entity(entity: Entity, style: LabelStyle, plan: _LabelPlan, parent: str) -> None:
+    """``parent`` is the full address of the container this entity sits in."""
     if isinstance(entity, Reference):
         # Labeling one stops it being a definition, so every [key] in the copy
         # becomes literal text. Its address lives in render_map instead.
         return
-    tag = f"{style.entity}{_entity_letter(entity)}{entity.index}"
+    letter = f"{_entity_letter(entity)}{entity.index}"
+    address = f"{parent}.{letter}"
+    tag = _tag(style, f"{style.entity}{letter}", address)
     if isinstance(entity, Paragraph):
         plan.label_paragraph(entity.line, tag)
     elif isinstance(entity, Section):
         _label_heading(entity, tag, plan)
         for child in entity.entities:
-            _label_entity(child, style, plan)
+            _label_entity(child, style, plan, address)
     else:
         # v1: a quote's inner entities resolve but are not sub-labeled inline.
+        if isinstance(entity, Table) and style.link is not None and entity.rows:
+            tag = f"{tag} \u00b7 {_table_hint(entity, style, address)}"
         plan.label_above(entity.line, tag)
+
+
+_TABLE_HINT_ROWS = 20  # past this the line is a wall of numbers; any row can still be typed
+
+
+def _table_hint(table: Table, style: LabelStyle, address: str) -> str:
+    """What a reader cannot otherwise discover: that a row, a column, a cell exist.
+
+    Only for a viewer that can act on a click. It sits on the label line, outside
+    the table, so the table itself renders exactly as written. The header counts
+    as row 1, as it does in the grammar.
+    """
+
+    def link(text: str, tail: str) -> str:
+        return f"[{text}]({style.link}{address}.{tail})"
+
+    shown = min(len(table.rows), _TABLE_HINT_ROWS)
+    rows = " ".join(link(str(n), str(n)) for n in range(1, shown + 1))
+    if shown < len(table.rows):
+        rows += " \u2026"
+    cols = " ".join(link(str(n), f",{n}") for n in range(1, len(table.rows[0]) + 1))
+    return f"{len(table.rows)} rows \u00d7 {len(table.rows[0])} cols \u00b7 rows {rows} \u00b7 cols {cols}"
 
 
 def _anchor_line(section: Section) -> int:
@@ -135,16 +183,18 @@ def _anchor_line(section: Section) -> int:
 
 
 def _label_section(section: Section, turn: int, style: LabelStyle, plan: _LabelPlan) -> None:
+    address = f"N{turn}-S{section.index}"
+    prefix = _tag(style, _section_prefix(section, turn, style), address)
     if section.line >= 0:
-        _label_heading(section, _section_prefix(section, turn, style), plan)
+        _label_heading(section, prefix, plan)
     else:  # implicit S1 — no heading line, anchor the marker above the first block
         anchor = _anchor_line(section)
         if anchor >= 0:  # nothing to anchor to: emit no marker rather than line 0
             # The blank line is the same rule label_above follows: without it the
             # block below is a lazy continuation of the marker's own paragraph.
-            plan.before[anchor][0:0] = [_section_header(section, turn, style), ""]
+            plan.before[anchor][0:0] = [prefix, ""]
     for entity in section.entities:
-        _label_entity(entity, style, plan)
+        _label_entity(entity, style, plan, address)
 
 
 def _source_lines(source: str) -> list[str]:
@@ -163,22 +213,43 @@ def _source_lines(source: str) -> list[str]:
     return lines
 
 
-def render_inline(msg: Message, style: LabelStyle = ASCII) -> str:
-    """The source with labels injected, formatting preserved."""
+def _emit(msg: Message, style: LabelStyle) -> list[tuple[int, str]]:
+    """Every output line with the source line it belongs to — a label belongs to
+    the line it is written on or above."""
     plan = _LabelPlan(_source_lines(msg.source))
     for section in msg.sections:
         _label_section(section, msg.turn, style, plan)
 
-    out: list[str] = []
+    out: list[tuple[int, str]] = []
     for idx, line in enumerate(plan.lines):
-        out.extend(plan.before.get(idx, []))
+        out.extend((idx, extra) for extra in plan.before.get(idx, []))
         if idx in plan.replace:
-            out.append(plan.replace[idx])
+            out.append((idx, plan.replace[idx]))
         elif idx in plan.prefix:
-            out.append(f"{plan.prefix[idx]} {line}")
+            out.append((idx, f"{plan.prefix[idx]} {line}"))
         else:
-            out.append(line)
-    return "\n".join(out)
+            out.append((idx, line))
+    return out
+
+
+def render_inline(msg: Message, style: LabelStyle = ASCII) -> str:
+    """The source with labels injected, formatting preserved."""
+    return "\n".join(line for _, line in _emit(msg, style))
+
+
+def render_blocks(msg: Message, starts: Sequence[int], style: LabelStyle = ASCII) -> list[str]:
+    """``render_inline``, cut into the pieces the reply arrived in.
+
+    ``starts`` is the source line each piece begins on. The turn is decomposed once,
+    whole, and each output line goes to the piece owning its source line — so a
+    piece's labels are the turn's labels, by construction, and cannot drift from
+    what ``resolve`` computes over the same tree. The blank line the pieces were
+    joined with belongs to the piece before it and is dropped here.
+    """
+    pieces: list[list[str]] = [[] for _ in starts]
+    for idx, line in _emit(msg, style):
+        pieces[max(bisect_right(starts, idx) - 1, 0)].append(line)
+    return ["\n".join(lines).rstrip("\n") for lines in pieces]
 
 
 def _excerpt(entity: Entity) -> str:  # ruff: ignore[too-many-return-statements]

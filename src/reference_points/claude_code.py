@@ -17,7 +17,7 @@ import re
 from typing import TYPE_CHECKING, Any, cast
 
 from reference_points.decompose import decompose
-from reference_points.transcript import Entry, Prompt, Transcript, Turn
+from reference_points.transcript import Block, Entry, Prompt, Transcript, Turn
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -80,9 +80,9 @@ def _is_cli_echo(text: str) -> bool:
     return any(head.startswith(marker) for marker in _CLI_ECHO)
 
 
-def _visible(jsonl: str) -> list[tuple[str, str]]:
-    """``(role, text)`` for every message a reader actually sees, in order."""
-    seen: list[tuple[str, str]] = []
+def _visible(jsonl: str) -> list[tuple[str, str, str]]:
+    """``(role, text, uuid)`` for every message a reader actually sees, in order."""
+    seen: list[tuple[str, str, str]] = []
     for record in _records(jsonl):
         if record.get("type") not in _SPOKEN or record.get("isSidechain") or record.get("isMeta"):
             continue
@@ -96,40 +96,52 @@ def _visible(jsonl: str) -> list[tuple[str, str]]:
         text = "\n\n".join(part for part in _texts(fields.get("content")) if part.strip())
         if role == "user":
             if _is_cli_echo(text):
-                seen.append((_BOUNDARY, ""))
+                seen.append((_BOUNDARY, "", ""))
                 continue
             text = _REMINDER_RE.sub("", text)
         if text.strip():
-            seen.append((cast("str", role), text.strip()))
+            uuid = record.get("uuid")
+            seen.append((cast("str", role), text.strip(), uuid if isinstance(uuid, str) else ""))
     return seen
 
 
-def _runs(messages: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Join each run of consecutive same-role messages into one.
+def _runs(messages: list[tuple[str, str, str]]) -> list[tuple[str, str, tuple[Block, ...]]]:
+    """Join each run of consecutive same-role messages into one, remembering where
+    in the joined text each message began.
 
     A boundary closes the open run without becoming one. Two replies that a
     discarded CLI record sat between are still two replies; joining them would
     renumber every turn after this point.
     """
-    runs: list[tuple[str, list[str]]] = []
-    for role, text in messages:
+    runs: list[tuple[str, list[tuple[str, str]]]] = []
+    for role, text, uuid in messages:
         if role == _BOUNDARY:
             runs.append((_BOUNDARY, []))
         elif runs and runs[-1][0] == role:
-            runs[-1][1].append(text)
+            runs[-1][1].append((text, uuid))
         else:
-            runs.append((role, [text]))
-    return [(role, "\n\n".join(parts)) for role, parts in runs if role != _BOUNDARY]
+            runs.append((role, [(text, uuid)]))
+    joined: list[tuple[str, str, tuple[Block, ...]]] = []
+    for role, parts in runs:
+        if role == _BOUNDARY:
+            continue
+        blocks: list[Block] = []
+        line = 0
+        for text, uuid in parts:
+            blocks.append(Block(uuid, line))
+            line += text.count("\n") + 2  # its own newlines, then the blank-line joiner
+        joined.append((role, "\n\n".join(text for text, _ in parts), tuple(blocks)))
+    return joined
 
 
 def parse(jsonl: str) -> Transcript:
     """Read the text of a session file into a :class:`Transcript`."""
     entries: list[Entry] = []
     turn = 0
-    for role, text in _runs(_visible(jsonl)):
+    for role, text, blocks in _runs(_visible(jsonl)):
         if role == "assistant":
             turn += 1
-            entries.append(Turn(decompose(text, turn=turn)))
+            entries.append(Turn(decompose(text, turn=turn), blocks))
         else:
             entries.append(Prompt(text))
     return Transcript(tuple(entries))
