@@ -10,3 +10,5 @@ build/
 _scratch/
 # Per-machine session state. Not .claude-plugin/, which is the tracked manifest.
 .claude/
+# Written by Claude Code for the mod's editor types; extends the ignored types/ above.
+/tsconfig.json
