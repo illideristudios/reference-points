@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from reference_points import serve as serve_module
 from reference_points.serve import Engine, answers, socket_path
 
 if TYPE_CHECKING:
@@ -140,3 +141,55 @@ def test_the_socket_path_is_short_private_and_stable_per_checkout() -> None:
     assert first == socket_path(Path("/some/checkout"))
     assert first != socket_path(Path("/another/checkout"))
     assert len(str(first)) < 100
+
+
+def test_a_runner_that_blows_up_is_answered_with_the_error_not_silence(private_dir: Path) -> None:
+    def broken(argv: list[str], stdin: str) -> tuple[int, str, str]:
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    path = private_dir / "h.sock"
+    engine = Engine(path, broken, lambda: 0)
+    thread = threading.Thread(target=engine.run, args=(5.0,))
+    thread.start()
+    try:
+        status, body = _post(path, {"argv": ["x"]})
+        assert status == 500
+        assert "UnicodeDecodeError" in str(body["error"])
+        assert _post(path, {"argv": ["x"]})[0] == 500  # and it is still serving
+    finally:
+        engine.done = True
+        _post(path, {"argv": []})
+        thread.join()
+        engine.server_close()
+
+
+def test_a_client_that_stalls_does_not_hold_the_server_forever(
+    private_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(serve_module._Handler, "timeout", 0.2)  # pyright: ignore[reportPrivateUsage]
+    path = private_dir / "i.sock"
+    engine = Engine(path, _run, lambda: 0)
+    thread = threading.Thread(target=engine.run, args=(5.0,))
+    thread.start()
+    stalled = socket.socket(socket.AF_UNIX)
+    stalled.connect(str(path))  # connects, then says nothing
+    try:
+        assert _post(path, {"argv": ["x"]})[0] == 200
+    finally:
+        stalled.close()
+        engine.done = True
+        _post(path, {"argv": []})
+        thread.join()
+        engine.server_close()
+
+
+def test_a_stopping_server_does_not_delete_the_socket_of_the_one_that_replaced_it(
+    private_dir: Path,
+) -> None:
+    path = private_dir / "j.sock"
+    old = Engine(path, _run, lambda: 0)
+    new = Engine(path, _run, lambda: 0)  # binds the same path, as a restart does
+    old.release()
+    assert answers(path)  # the new server's socket is untouched
+    new.release()
+    assert not path.exists()

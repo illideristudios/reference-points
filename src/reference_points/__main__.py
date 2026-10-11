@@ -162,10 +162,13 @@ def _message(args: argparse.Namespace) -> Message:
 
 
 def _expand(transcript_file: str) -> int:
+    refs = find_refs(sys.stdin.read())
+    if not refs:  # a plain prompt must go through even before the transcript exists
+        return 0
     transcript = claude_code.parse(_read(transcript_file))
     # Resolve all before printing any: a prompt with one bad address gets the
     # error alone, not a half-expanded context to mistake for the whole answer.
-    found = [(ref, resolve_in(ref, transcript).content) for ref in find_refs(sys.stdin.read())]
+    found = [(ref, resolve_in(ref, transcript).content) for ref in refs]
     if found:
         print("\n\n".join(f"[{ref.raw}]\n{content}" for ref, content in found))
     return 0

@@ -47,6 +47,10 @@ _ADDRESS_IN_TEXT_RE = re.compile(
     rf"(?:(?:-S\d+| ?\u00a7\d+)(?:{_STEP})*|(?:{_STEP})+)"
     r"(?:\.\d+(?:,\d+)?|\.,\d+)?"
     r"(?:\.?\(g?/[^\n]*?/\))?"
+    # Where the address goes on in a way the grammar has no place for ("2-4", "2,3,4",
+    # ".foo"), take the rest of the word too, so parse_ref rejects what was written
+    # instead of resolving its valid-looking front.
+    r"(?:(?:[.\-](?=[\w*])|,(?=\d))\S*)?"
 )
 _ROW_COL_RE = re.compile(r"(\d+),(\d+)$")
 _COL_ONLY_RE = re.compile(r",(\d+)$")

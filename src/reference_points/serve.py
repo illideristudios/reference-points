@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 IDLE_SECONDS = 1800.0  # a server nobody calls for half an hour stops
+REQUEST_SECONDS = 5.0  # a client that connects and says nothing must not hold the server
 _MAX_PATH = 100  # sun_path is 104 bytes on macOS, 108 on Linux
 
 
@@ -59,6 +60,8 @@ def answers(path: Path) -> bool:
 
 
 class _Handler(BaseHTTPRequestHandler):
+    timeout = REQUEST_SECONDS
+
     def do_POST(self) -> None:
         engine = cast("Engine", self.server)
         try:
@@ -74,7 +77,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._reply(503, {"error": "the engine changed on disk; this server is stopping"})
             engine.done = True
             return
-        code, out, err = engine.runner(argv, stdin)
+        try:
+            code, out, err = engine.runner(argv, stdin)
+        except Exception as exc:
+            # Say what broke; dropping the connection leaves the caller guessing.
+            self._reply(500, {"error": f"{type(exc).__name__}: {exc}"})
+            return
         self._reply(200, {"exitCode": code, "stdout": out, "stderr": err})
 
     def _reply(self, status: int, body: dict[str, object]) -> None:
@@ -105,6 +113,8 @@ class Engine(socketserver.UnixStreamServer):
         path.unlink(missing_ok=True)
         super().__init__(str(path), _Handler)
         path.chmod(0o600)
+        self.path = path
+        self.inode = path.stat().st_ino
         self.runner = runner
         self.code_version = code_version
         self.started_as = code_version()
@@ -112,6 +122,16 @@ class Engine(socketserver.UnixStreamServer):
 
     def handle_timeout(self) -> None:
         self.done = True
+
+    def release(self) -> None:
+        """Stop listening and remove the socket file, unless a newer server has since
+        bound the same path: that file is its, not ours."""
+        self.server_close()
+        try:
+            if self.path.stat().st_ino == self.inode:
+                self.path.unlink()
+        except FileNotFoundError:
+            pass
 
     def run(self, idle: float = IDLE_SECONDS) -> None:
         """Serve until the code changes or nothing arrives for ``idle`` seconds."""
@@ -144,7 +164,6 @@ def serve(
     try:
         engine.run()
     finally:
-        engine.server_close()
-        path.unlink(missing_ok=True)
+        engine.release()
         if daemon:
             os._exit(0)  # the child must not fall back into the parent's CLI

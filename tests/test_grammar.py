@@ -319,3 +319,16 @@ def test_find_refs_reads_every_location_form() -> None:
         "N1-S1.T2(g/x/)",
     ]
     assert [r.raw for r in find_refs("; ".join(forms) + ".")] == forms
+
+
+@pytest.mark.parametrize(
+    "written", ["N3-S1.P1.2-4", "N3-S1.T1.2,3,4", "N3-S1.P1.2.5", "N3-S1.P1.*", "N3-S1.R1.foo"]
+)
+def test_find_refs_never_resolves_a_prefix_of_what_was_written(written: str) -> None:
+    # The valid-looking front of a malformed address is not what the writer cited.
+    with pytest.raises(RefError):
+        find_refs(f"see {written} please")
+
+
+def test_find_refs_still_splits_addresses_run_together_with_a_comma() -> None:
+    assert [r.raw for r in find_refs("compare N1-S1.P1,N1-S1.P2 now")] == ["N1-S1.P1", "N1-S1.P2"]

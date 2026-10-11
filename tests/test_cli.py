@@ -200,3 +200,20 @@ def test_a_request_cannot_start_another_server() -> None:
     code, _, err = run_captured(["serve"], "")
     assert code == 1
     assert err.startswith("REJECTED:")
+
+
+def test_expand_does_not_read_the_transcript_for_a_prompt_with_no_address(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A plain prompt must go through even when the transcript is not there yet.
+    monkeypatch.setattr("sys.stdin", io.StringIO("hello there"))
+    assert main(["expand", "/nonexistent/session.jsonl"]) == 0
+    assert not capsys.readouterr().out
+
+
+def test_expand_still_reports_an_unreadable_transcript_when_there_is_an_address(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("what did N1-S1.P2 mean?"))
+    assert main(["expand", "/nonexistent/session.jsonl"]) == 1
+    assert capsys.readouterr().err.startswith("UNREADABLE: ")
