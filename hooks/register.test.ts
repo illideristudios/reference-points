@@ -284,3 +284,53 @@ test('with no server the CLI answers, and a server is started once for the next 
   const third = await $.prompt.submit({ text: 'N1-S1.P2?', wait: false, origin: { kind: 'user' } })
   expect(third.context).toEqual(['[N1-S1.P2]\nvia socket'])
 })
+
+test('a block that cannot be labeled stops costing a process once its retries are spent', async ($, on) => {
+  let spawned = 0
+  on('process.run', ($, e) => {
+    if (e.argv[1] !== 'serve') spawned++
+    return { value: { exitCode: 1, stdout: '', stderr: 'MISSING: no reply record' } }
+  })
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  on('classic.SessionStart', () => ({}))
+  on('session.id', () => ({ value: 'abc' }))
+  mock.store(on)
+  const clock = mock.clock(on)
+
+  await $.classic.SessionStart({ source: 'startup', transcript_path: TRANSCRIPT })
+  const ui = await $.ui.mount(drawn('Not a reply record.'))
+  for (let i = 0; i < 3; i++) {
+    await clock.advance(1000)
+    await ui.redraw({ text: 'Not a reply record.', isFirstOfReply: true })
+  }
+  const spent = spawned
+  // A scroll, a resize, a redraw for any reason: the answer has not changed.
+  for (let i = 0; i < 5; i++) {
+    await clock.advance(5000)
+    await ui.redraw({ text: 'Not a reply record.', isFirstOfReply: true })
+  }
+  expect(spawned).toBe(spent)
+})
+
+test('output that is not JSON is a failed try, retried, not a rejection kept for good', async ($, on) => {
+  let spawned = 0
+  on('process.run', ($, e) => {
+    if (e.argv[1] !== 'serve') spawned++
+    return { value: { exitCode: 0, stdout: 'warning: not json\n', stderr: '' } }
+  })
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  on('classic.SessionStart', () => ({}))
+  on('session.id', () => ({ value: 'abc' }))
+  mock.store(on)
+  const clock = mock.clock(on)
+
+  await $.classic.SessionStart({ source: 'startup', transcript_path: TRANSCRIPT })
+  const ui = await $.ui.mount(drawn('Hello there.'))
+  await clock.advance(1000)
+  await ui.redraw({ text: 'Hello there.', isFirstOfReply: true })
+
+  expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeDefined()
+  expect(spawned).toBe(2) // tried again, as for any failure
+})

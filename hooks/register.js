@@ -64,11 +64,14 @@ const engine = async ($, ...args) => {
 
 // null when the engine says no — most often because the record is not in the
 // transcript file yet; the caller draws the reply as Claude Code would.
-const labelBlock = ($, transcript, uuid) =>
-  engine($, 'label', transcript, '-T', '--block', uuid).then(
-    (ran) => (ran.exitCode === 0 ? JSON.parse(ran.stdout) : null),
-    () => null,
-  )
+const labelBlock = async ($, transcript, uuid) => {
+  try {
+    const ran = await engine($, 'label', transcript, '-T', '--block', uuid)
+    return ran.exitCode === 0 ? JSON.parse(ran.stdout) : null
+  } catch {
+    return null
+  }
+}
 
 export function register(on) {
   on('classic.SessionStart', async ($, e, next) => {
@@ -89,6 +92,9 @@ export function register(on) {
     blocks.set(e.requestId, block)
     if (block.length !== length) Object.assign(block, { length, tries: 0, hit: undefined })
     if (!block.hit) {
+      // Retries spent on this text: it will not label by being drawn again. A change
+      // of length starts a new count.
+      if (block.tries >= MAX_TRIES) return next(e)
       // A streaming block grows by the chunk and its record is not written yet, so a
       // try per chunk is a process per chunk: one a second, and a wake-up for the rest.
       const wait = RETRY_MS - (now - block.lastTry)
