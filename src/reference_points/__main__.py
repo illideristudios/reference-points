@@ -79,21 +79,23 @@ _read_so_far: dict[str, tuple[int, int, list[claude_code.Spoken]]] = {}
 def _transcript(source: str) -> Transcript:
     if source == "-":
         return claude_code.parse(sys.stdin.read())
-    with Path(source).open("rb") as file:
+    # Records run to hundreds of KB; at the default 8 KB buffer, reading lines was most
+    # of what reading a transcript cost once undecoded records were skipped.
+    with Path(source).open("rb", buffering=1 << 20) as file:
         info = os.fstat(file.fileno())
         inode, offset, seen = _read_so_far.get(source, (info.st_ino, 0, []))
         if inode != info.st_ino or info.st_size < offset:  # replaced or rewritten
             offset, seen = 0, []
         file.seek(offset)
-        fresh: list[str] = []
-        tail = ""  # a last line still being written: read now, read again next call
-        for raw in file:
+        fresh: list[claude_code.Spoken] = []
+        tail = b""  # a last line still being written: read now, read again next call
+        for raw in file:  # a line at a time: holding them all is holding the file
             if not raw.endswith(b"\n"):
-                tail = raw.decode("utf-8")
+                tail = raw
                 break
-            fresh.append(raw.decode("utf-8"))
+            fresh.extend(claude_code.visible([raw]))
             offset += len(raw)
-    seen = [*seen, *claude_code.visible(fresh)]
+    seen = [*seen, *fresh]
     _read_so_far[source] = (info.st_ino, offset, seen)
     return claude_code.transcript([*seen, *claude_code.visible([tail])])
 

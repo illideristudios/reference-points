@@ -37,6 +37,13 @@ _BOUNDARY = "boundary"
 # prompt text; it cannot affect numbering, since prompts are never numbered.
 _REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>\s*", re.DOTALL)
 
+# Claude Code writes bookkeeping records (``api-request`` alone is nine tenths of a
+# long session's bytes) with ``type`` as the first key. Read off the line, a plainly
+# spelled type is the record's own, since ``JSON.stringify`` writes no duplicate keys;
+# any other line is decoded to find out.
+_TYPE_FIRST = re.compile(rb'\{"type":"([^"\\]*)"')
+_SPOKEN_TYPES = frozenset({b"user", b"assistant"})
+
 
 # A message is ``(role, text, uuid)``; a role of ``_BOUNDARY`` is a discarded CLI record.
 Spoken = tuple[str, str, str]
@@ -47,15 +54,19 @@ Spoken = tuple[str, str, str]
 _decompose = lru_cache(maxsize=8192)(decompose)
 
 
-def _records(jsonl_lines: Iterable[str]) -> Iterator[dict[str, Any]]:
-    """Every well-formed record. A malformed line is skipped rather than fatal —
-    a truncated final line is normal in a session still being written."""
+def _records(jsonl_lines: Iterable[bytes]) -> Iterator[dict[str, Any]]:
+    """Every well-formed record that could be spoken. A malformed line, or one that
+    is not UTF-8, is skipped rather than fatal — a truncated final line is normal in
+    a session still being written."""
     for line in jsonl_lines:
         if not line.strip():
             continue
+        typed = _TYPE_FIRST.match(line)
+        if typed and typed.group(1) not in _SPOKEN_TYPES:
+            continue
         try:
             record: object = json.loads(line)
-        except json.JSONDecodeError:
+        except ValueError:  # JSONDecodeError and UnicodeDecodeError both
             continue
         if isinstance(record, dict):
             yield cast("dict[str, Any]", record)
@@ -90,7 +101,7 @@ def _is_cli_echo(text: str) -> bool:
     return any(head.startswith(marker) for marker in _CLI_ECHO)
 
 
-def visible(jsonl_lines: Iterable[str]) -> list[Spoken]:
+def visible(jsonl_lines: Iterable[bytes]) -> list[Spoken]:
     """Every message a reader actually sees, in order. Lines are independent, so a
     caller holding the result for a file's start can read only what was appended."""
     seen: list[Spoken] = []
@@ -150,7 +161,7 @@ def parse(jsonl: str) -> Transcript:
 
     Records end at ``\n`` only: ``splitlines`` also breaks at U+2028, which Claude
     Code leaves raw inside a JSON string, cutting a record in two."""
-    return transcript(visible(jsonl.split("\n")))
+    return transcript(visible(jsonl.encode().split(b"\n")))
 
 
 def transcript(messages: list[Spoken]) -> Transcript:
