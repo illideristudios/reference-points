@@ -2,7 +2,9 @@
 
 Starting Python and importing the engine costs about 0.1s, the labeling itself
 about 0.01s, and the mod makes a call per prompt and per streamed block. Serving
-the same ``main`` from one process leaves the request. There is no second
+the same ``main`` from one process leaves the request. One process is also what
+lets ``__main__`` remember a transcript between calls and decode only what was
+appended to it. There is no second
 implementation to drift from the first: a request is an argv and some stdin, and
 the answer is what the CLI would have printed.
 

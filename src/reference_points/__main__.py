@@ -32,8 +32,10 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from reference_points import claude_code, serve
 from reference_points.decompose import Entity, Message, Quote, Section, decompose
@@ -58,11 +60,42 @@ from reference_points.render import (
 )
 from reference_points.resolve import ResolveError, find_turn, resolve, resolve_in
 
+if TYPE_CHECKING:
+    from reference_points.transcript import Transcript
+
 
 def _read(source: str) -> str:
     if source == "-":
         return sys.stdin.read()
     return Path(source).read_text(encoding="utf-8")
+
+
+# Per transcript path: its inode, the offset after its last whole line, and what
+# the lines before that offset said. A server answers a call per streamed block on
+# one append-only file, so it decodes only what was appended since the last call.
+_read_so_far: dict[str, tuple[int, int, list[claude_code.Spoken]]] = {}
+
+
+def _transcript(source: str) -> Transcript:
+    if source == "-":
+        return claude_code.parse(sys.stdin.read())
+    with Path(source).open("rb") as file:
+        info = os.fstat(file.fileno())
+        inode, offset, seen = _read_so_far.get(source, (info.st_ino, 0, []))
+        if inode != info.st_ino or info.st_size < offset:  # replaced or rewritten
+            offset, seen = 0, []
+        file.seek(offset)
+        fresh: list[str] = []
+        tail = ""  # a last line still being written: read now, read again next call
+        for raw in file:
+            if not raw.endswith(b"\n"):
+                tail = raw.decode("utf-8")
+                break
+            fresh.append(raw.decode("utf-8"))
+            offset += len(raw)
+    seen = [*seen, *claude_code.visible(fresh)]
+    _read_so_far[source] = (info.st_ino, offset, seen)
+    return claude_code.transcript([*seen, *claude_code.visible([tail])])
 
 
 def _tree_lines(entities: tuple[Entity, ...], indent: str) -> list[str]:
@@ -155,17 +188,16 @@ def _build_parser() -> argparse.ArgumentParser:
 def _message(args: argparse.Namespace) -> Message:
     """The one message a command operates on. In transcript mode ``--turn`` picks
     it out of the conversation; otherwise it is the whole file."""
-    text = _read(args.file)
     if args.transcript:
-        return find_turn(claude_code.parse(text), args.turn)
-    return decompose(text, turn=args.turn if args.turn is not None else 1)
+        return find_turn(_transcript(args.file), args.turn)
+    return decompose(_read(args.file), turn=args.turn if args.turn is not None else 1)
 
 
 def _expand(transcript_file: str) -> int:
     refs = find_refs(sys.stdin.read())
     if not refs:  # a plain prompt must go through even before the transcript exists
         return 0
-    transcript = claude_code.parse(_read(transcript_file))
+    transcript = _transcript(transcript_file)
     # Resolve all before printing any: a prompt with one bad address gets the
     # error alone, not a half-expanded context to mistake for the whole answer.
     found = [(ref, resolve_in(ref, transcript).content) for ref in refs]
@@ -180,7 +212,7 @@ def _sourceless(args: argparse.Namespace) -> int | None:
         print(parse_ref(args.ref, turn=args.turn))
         return 0
     if args.cmd == "turns":
-        print(len(claude_code.parse(_read(args.file)).turns))
+        print(len(_transcript(args.file).turns))
         return 0
     if args.cmd == "expand":
         return _expand(args.file)
@@ -239,7 +271,7 @@ def run_captured(argv: list[str], stdin: str) -> tuple[int, str, str]:
 
 def _block(transcript_file: str, uuid: str) -> int:
     """One record of a reply, labeled as the part of its turn that it is."""
-    for turn in claude_code.parse(_read(transcript_file)).turns:
+    for turn in _transcript(transcript_file).turns:
         for index, block in enumerate(turn.blocks):
             if block.uuid == uuid:
                 text = render_blocks(turn.message, [b.line for b in turn.blocks], LINKED)[index]
@@ -263,11 +295,11 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.cmd == "resolve":
         ref = parse_ref(args.ref, turn=args.turn)
         if args.transcript:
-            print(resolve_in(ref, claude_code.parse(_read(args.file))).content)
+            print(resolve_in(ref, _transcript(args.file)).content)
         else:
             print(resolve(ref, _message(args)).content)
     elif whole_transcript:
-        transcript = claude_code.parse(_read(args.file))
+        transcript = _transcript(args.file)
         if args.cmd == "label":
             print(render_transcript(transcript, style=style))
         elif args.cmd == "map":

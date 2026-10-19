@@ -196,6 +196,22 @@ def test_a_malformed_line_is_skipped_not_fatal() -> None:
     assert [t.message.turn for t in claude_code.parse(jsonl).turns] == [1]
 
 
+def test_a_line_separator_inside_a_reply_does_not_split_its_record() -> None:
+    # Claude Code writes U+2028 raw inside a JSON string. Splitting on it cuts the
+    # record into two malformed halves, both skipped, and every later turn shifts.
+    jsonl = "\n".join([
+        json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": "a\u2028b"}},
+            ensure_ascii=False,
+        ),
+        _user("next"),
+        _assistant("second."),
+    ])
+    turns = claude_code.parse(jsonl).turns
+    assert [t.message.turn for t in turns] == [1, 2]
+    assert turns[0].message.source == "a\u2028b"
+
+
 def test_an_empty_transcript_reads_clean() -> None:
     assert claude_code.parse("").entries == ()
 
