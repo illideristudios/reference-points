@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from reference_points import claude_code
 from reference_points.__main__ import main, run_captured
 
 if TYPE_CHECKING:
@@ -217,3 +218,72 @@ def test_expand_still_reports_an_unreadable_transcript_when_there_is_an_address(
     monkeypatch.setattr("sys.stdin", io.StringIO("what did N1-S1.P2 mean?"))
     assert main(["expand", "/nonexistent/session.jsonl"]) == 1
     assert capsys.readouterr().err.startswith("UNREADABLE: ")
+
+
+def _said(role: str, text: str) -> str:
+    message = {"role": role, "content": [{"type": "text", "text": text}]}
+    return json.dumps({"type": role, "message": message}) + "\n"
+
+
+def _turns(path: Path, capsys: pytest.CaptureFixture[str]) -> str:
+    assert main(["turns", str(path)]) == 0
+    return capsys.readouterr().out.strip()
+
+
+def test_a_second_call_decodes_only_what_was_appended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The server answers a call per streamed block on one growing file; decoding
+    # the whole file each time is what made a long session cost seconds a block.
+    path = tmp_path / "t.jsonl"
+    path.write_text(_said("user", "q1") + _said("assistant", "a1"))
+    assert _turns(path, capsys) == "1"
+    with path.open("a") as f:
+        f.write(_said("user", "q2") + _said("assistant", "a2"))
+    decoded: list[str] = []
+    loads = json.loads
+
+    def counted(line: str) -> object:
+        decoded.append(line)
+        return loads(line)
+
+    monkeypatch.setattr(claude_code.json, "loads", counted)
+    assert _turns(path, capsys) == "2"
+    assert len(decoded) == 2
+
+
+def test_a_line_still_being_written_is_read_once_it_is_whole(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "t.jsonl"
+    whole = _said("assistant", "a2")
+    path.write_text(
+        _said("user", "q1") + _said("assistant", "a1") + _said("user", "q2") + whole[:9]
+    )
+    assert _turns(path, capsys) == "1"
+    with path.open("a") as f:
+        f.write(whole[9:])
+    assert _turns(path, capsys) == "2"
+
+
+def test_a_file_rewritten_in_place_is_read_again_from_the_start(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "t.jsonl"
+    path.write_text(_said("assistant", "a1") + _said("user", "q") + _said("assistant", "a2"))
+    assert _turns(path, capsys) == "2"
+    path.write_text(_said("assistant", "only"))  # same file, shorter
+    assert _turns(path, capsys) == "1"
+
+
+def test_a_file_replaced_by_another_is_not_mistaken_for_its_continuation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "t.jsonl"
+    path.write_text(_said("assistant", "old."))
+    assert _turns(path, capsys) == "1"
+    other = tmp_path / "other.jsonl"
+    other.write_text(_said("assistant", "new.") + _said("user", "q") + _said("assistant", "more."))
+    other.replace(path)  # a new file, longer, under the old name
+    assert main(["resolve", "N1-S1.P1", str(path), "-T"]) == 0
+    assert capsys.readouterr().out.strip() == "new."

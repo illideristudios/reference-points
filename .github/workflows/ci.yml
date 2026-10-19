@@ -18,11 +18,12 @@ jobs:
     # same order. Each step runs even if an earlier one failed, so one PR run
     # reports every defect instead of only the first.
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # a hung test fails the run instead of holding it for six hours
     steps:
       - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v9
+        uses: astral-sh/setup-uv@v10.3.0  # no floating major tag after v7
         with:
           enable-cache: true
 

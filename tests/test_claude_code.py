@@ -8,9 +8,13 @@ after it, and an address that used to be right silently becomes wrong.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from reference_points import claude_code
 from reference_points.transcript import Prompt, Turn
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _line(**record: object) -> str:
@@ -194,6 +198,66 @@ def test_a_malformed_line_is_skipped_not_fatal() -> None:
     # A session still being written ends in a partial line.
     jsonl = _assistant("reply.") + '\n{"type": "assist'
     assert [t.message.turn for t in claude_code.parse(jsonl).turns] == [1]
+
+
+def test_a_line_separator_inside_a_reply_does_not_split_its_record() -> None:
+    # Claude Code writes U+2028 raw inside a JSON string. Splitting on it cuts the
+    # record into two malformed halves, both skipped, and every later turn shifts.
+    jsonl = "\n".join([
+        json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": "a\u2028b"}},
+            ensure_ascii=False,
+        ),
+        _user("next"),
+        _assistant("second."),
+    ])
+    turns = claude_code.parse(jsonl).turns
+    assert [t.message.turn for t in turns] == [1, 2]
+    assert turns[0].message.source == "a\u2028b"
+
+
+def _compact(**record: object) -> str:
+    """As Claude Code writes a record: ``JSON.stringify``, no spaces."""
+    return json.dumps(record, separators=(",", ":"))
+
+
+def test_a_bookkeeping_record_is_skipped_without_decoding_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Nine tenths of a long session's bytes are records like this one; decoding
+    # each to learn its type was most of what reading a transcript cost.
+    decoded: list[object] = []
+    loads = json.loads
+
+    def counted(line: str | bytes) -> object:
+        decoded.append(line)
+        return loads(line)
+
+    monkeypatch.setattr(claude_code.json, "loads", counted)
+    jsonl = "\n".join([
+        _compact(type="api-request", body={"messages": [{"role": "assistant", "content": "no"}]}),
+        _compact(type="assistant", message={"role": "assistant", "content": "yes."}),
+    ])
+    turns = claude_code.parse(jsonl).turns
+    assert [t.message.source for t in turns] == ["yes."]
+    assert len(decoded) == 1
+
+
+def test_a_type_written_with_an_escape_is_still_decoded() -> None:
+    # The skip reads the type off the line only when it is spelled plainly.
+    line = _compact(type="TYPE", message={"role": "assistant", "content": "kept."})
+    jsonl = line.replace('"TYPE"', '"assist\\u0061nt"')
+    assert [t.message.source for t in claude_code.parse(jsonl).turns] == ["kept."]
+
+
+def test_a_line_that_is_not_utf8_is_skipped_not_fatal() -> None:
+    lines = [
+        b'{"type":"assistant","message":{"role":"assistant","content":"\xff"}}',
+        _assistant("ok.").encode(),
+    ]
+    assert [t.message.source for t in claude_code.transcript(claude_code.visible(lines)).turns] == [
+        "ok."
+    ]
 
 
 def test_an_empty_transcript_reads_clean() -> None:

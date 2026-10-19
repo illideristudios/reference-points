@@ -3,6 +3,7 @@ instead of a Python start."""
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import json
 import shutil
@@ -22,17 +23,19 @@ if TYPE_CHECKING:
 
 
 class _Unix(http.client.HTTPConnection):
-    def __init__(self, path: Path) -> None:
-        super().__init__("reference-points")
+    def __init__(self, path: Path, timeout: float) -> None:
+        super().__init__("reference-points", timeout=timeout)
         self._path = path
 
     def connect(self) -> None:
         self.sock = socket.socket(socket.AF_UNIX)
+        self.sock.settimeout(self.timeout)
         self.sock.connect(str(self._path))
 
 
-def _post(path: Path, body: object) -> tuple[int, dict[str, object]]:
-    conn = _Unix(path)
+def _post(path: Path, body: object, timeout: float = 10.0) -> tuple[int, dict[str, object]]:
+    """A hung server fails the test in seconds instead of holding CI until its limit."""
+    conn = _Unix(path, timeout)
     conn.request("POST", "/", body=json.dumps(body))
     response = conn.getresponse()
     return response.status, json.loads(response.read())
@@ -51,6 +54,17 @@ def _run(argv: list[str], stdin: str) -> tuple[int, str, str]:
     return 0, f"ran {argv} on {stdin!r}", "warn"
 
 
+def _stop(engine: Engine, path: Path, thread: threading.Thread) -> None:
+    engine.done = True
+    # Wake the loop so it sees `done`. It may already have seen it on its way back
+    # from the last request and left without accepting this one, so nobody answering
+    # is a stop too, not a hang.
+    with contextlib.suppress(OSError, http.client.HTTPException):
+        _post(path, {"argv": []}, timeout=1.0)
+    thread.join()
+    engine.server_close()
+
+
 def test_a_request_is_answered_with_the_cli_exit_code_and_output(private_dir: Path) -> None:
     path = private_dir / "a.sock"
     engine = Engine(path, _run, lambda: 0)
@@ -65,10 +79,7 @@ def test_a_request_is_answered_with_the_cli_exit_code_and_output(private_dir: Pa
             "stderr": "warn",
         }
     finally:
-        engine.done = True
-        _post(path, {"argv": []})  # wake the loop so it sees `done`
-        thread.join()
-        engine.server_close()
+        _stop(engine, path, thread)
 
 
 def test_a_malformed_request_is_refused_not_guessed_at(private_dir: Path) -> None:
@@ -81,10 +92,7 @@ def test_a_malformed_request_is_refused_not_guessed_at(private_dir: Path) -> Non
         assert status == 400
         assert "argv" in str(body["error"])
     finally:
-        engine.done = True
-        _post(path, {"argv": []})
-        thread.join()
-        engine.server_close()
+        _stop(engine, path, thread)
 
 
 def test_a_server_whose_code_changed_refuses_and_stops(private_dir: Path) -> None:
@@ -157,10 +165,7 @@ def test_a_runner_that_blows_up_is_answered_with_the_error_not_silence(private_d
         assert "UnicodeDecodeError" in str(body["error"])
         assert _post(path, {"argv": ["x"]})[0] == 500  # and it is still serving
     finally:
-        engine.done = True
-        _post(path, {"argv": []})
-        thread.join()
-        engine.server_close()
+        _stop(engine, path, thread)
 
 
 def test_a_client_that_stalls_does_not_hold_the_server_forever(
@@ -177,10 +182,7 @@ def test_a_client_that_stalls_does_not_hold_the_server_forever(
         assert _post(path, {"argv": ["x"]})[0] == 200
     finally:
         stalled.close()
-        engine.done = True
-        _post(path, {"argv": []})
-        thread.join()
-        engine.server_close()
+        _stop(engine, path, thread)
 
 
 def test_a_stopping_server_does_not_delete_the_socket_of_the_one_that_replaced_it(

@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, cast
 
 from reference_points.decompose import decompose
 from reference_points.transcript import Block, Entry, Prompt, Transcript, Turn
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
 
 _SPOKEN = frozenset({"user", "assistant"})
 
@@ -36,16 +37,36 @@ _BOUNDARY = "boundary"
 # prompt text; it cannot affect numbering, since prompts are never numbered.
 _REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>\s*", re.DOTALL)
 
+# Claude Code writes bookkeeping records (``api-request`` alone is nine tenths of a
+# long session's bytes) with ``type`` as the first key. Read off the line, a plainly
+# spelled type is the record's own, since ``JSON.stringify`` writes no duplicate keys;
+# any other line is decoded to find out.
+_TYPE_FIRST = re.compile(rb'\{"type":"([^"\\]*)"')
+_SPOKEN_TYPES = frozenset({b"user", b"assistant"})
 
-def _records(jsonl: str) -> Iterator[dict[str, Any]]:
-    """Every well-formed record. A malformed line is skipped rather than fatal —
-    a truncated final line is normal in a session still being written."""
-    for line in jsonl.splitlines():
+
+# A message is ``(role, text, uuid)``; a role of ``_BOUNDARY`` is a discarded CLI record.
+Spoken = tuple[str, str, str]
+
+# Each call rebuilds every turn from its text, and all but the one being written are
+# unchanged since the last call.
+# shortcut: past 8192 turns in one transcript every call misses, upgrade to a per-file cache then.
+_decompose = lru_cache(maxsize=8192)(decompose)
+
+
+def _records(jsonl_lines: Iterable[bytes]) -> Iterator[dict[str, Any]]:
+    """Every well-formed record that could be spoken. A malformed line, or one that
+    is not UTF-8, is skipped rather than fatal — a truncated final line is normal in
+    a session still being written."""
+    for line in jsonl_lines:
         if not line.strip():
+            continue
+        typed = _TYPE_FIRST.match(line)
+        if typed and typed.group(1) not in _SPOKEN_TYPES:
             continue
         try:
             record: object = json.loads(line)
-        except json.JSONDecodeError:
+        except ValueError:  # JSONDecodeError and UnicodeDecodeError both
             continue
         if isinstance(record, dict):
             yield cast("dict[str, Any]", record)
@@ -80,10 +101,11 @@ def _is_cli_echo(text: str) -> bool:
     return any(head.startswith(marker) for marker in _CLI_ECHO)
 
 
-def _visible(jsonl: str) -> list[tuple[str, str, str]]:
-    """``(role, text, uuid)`` for every message a reader actually sees, in order."""
-    seen: list[tuple[str, str, str]] = []
-    for record in _records(jsonl):
+def visible(jsonl_lines: Iterable[bytes]) -> list[Spoken]:
+    """Every message a reader actually sees, in order. Lines are independent, so a
+    caller holding the result for a file's start can read only what was appended."""
+    seen: list[Spoken] = []
+    for record in _records(jsonl_lines):
         if record.get("type") not in _SPOKEN or record.get("isSidechain") or record.get("isMeta"):
             continue
         message = record.get("message")
@@ -105,7 +127,7 @@ def _visible(jsonl: str) -> list[tuple[str, str, str]]:
     return seen
 
 
-def _runs(messages: list[tuple[str, str, str]]) -> list[tuple[str, str, tuple[Block, ...]]]:
+def _runs(messages: list[Spoken]) -> list[tuple[str, str, tuple[Block, ...]]]:
     """Join each run of consecutive same-role messages into one, remembering where
     in the joined text each message began.
 
@@ -135,13 +157,21 @@ def _runs(messages: list[tuple[str, str, str]]) -> list[tuple[str, str, tuple[Bl
 
 
 def parse(jsonl: str) -> Transcript:
-    """Read the text of a session file into a :class:`Transcript`."""
+    """Read the text of a session file into a :class:`Transcript`.
+
+    Records end at ``\n`` only: ``splitlines`` also breaks at U+2028, which Claude
+    Code leaves raw inside a JSON string, cutting a record in two."""
+    return transcript(visible(jsonl.encode().split(b"\n")))
+
+
+def transcript(messages: list[Spoken]) -> Transcript:
+    """The conversation the :func:`visible` messages of a whole file make."""
     entries: list[Entry] = []
     turn = 0
-    for role, text, blocks in _runs(_visible(jsonl)):
+    for role, text, blocks in _runs(messages):
         if role == "assistant":
             turn += 1
-            entries.append(Turn(decompose(text, turn=turn), blocks))
+            entries.append(Turn(_decompose(text, turn=turn), blocks))
         else:
             entries.append(Prompt(text))
     return Transcript(tuple(entries))
